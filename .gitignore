@@ -18,3 +18,13 @@ out
 .deploy
 .logs
 *.tsbuildinfo
+
+# Environment
+nextjs_space/.env
+.env
+
+# Prisma generated
+nextjs_space/node_modules
+
+# System
+.DS_Store
