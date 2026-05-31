@@ -28,10 +28,15 @@ JSON formatında yanıt ver:
   "description": "Ürün/hizmet açıklaması",
   "date": "YYYY-MM-DD",
   "vendorName": "Satıcı/mağaza adı",
-  "category": "Kategori önerisi (Market, Yemek, Ulaşım, Sağlık, Eğitim, Giyim, Teknoloji, Ev, Fatura, Diğer)",
-  "items": ["kalem1", "kalem2"]
+  "category": "Genel kategori önerisi",
+  "items": ["kalem1", "kalem2"],
+  "lineItems": [
+    { "description": "Kalem adı/açıklaması", "amount": 100.00, "category": "Kategori önerisi (Market, Yemek, Ulaşım, Sağlık, Eğitim, Giyim, Teknoloji, Ev, Fatura, Diğer)" },
+    { "description": "Diğer kalem", "amount": 50.00, "category": "Kategori" }
+  ]
 }
 
+ÖNEMLİ: Belgede birden fazla kalem/ürün varsa, her birini ayrı ayrı lineItems içinde listele. Her kalemin kendi tutarı ve açıklaması olsun. amount tüm kalemlerin toplamı olsun.
 Sadece JSON olarak yanıt ver, başka hiçbir şey ekleme. Eğer bilgi bulunamazsa ilgili alanı boş bırak veya 0 yap.`;
 
     let messages: any[] = [];

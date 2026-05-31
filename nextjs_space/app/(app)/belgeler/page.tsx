@@ -15,6 +15,12 @@ import {
   AlertCircle, Eye, Trash2, ArrowRight
 } from 'lucide-react';
 
+interface OcrLineItem {
+  description: string;
+  amount: number;
+  category: string;
+}
+
 interface OcrResult {
   amount: number;
   description: string;
@@ -22,6 +28,7 @@ interface OcrResult {
   vendorName: string;
   category: string;
   items: string[];
+  lineItems?: OcrLineItem[];
 }
 
 export default function BelgelerPage() {
@@ -167,12 +174,24 @@ export default function BelgelerPage() {
 
   const handleCreateTransaction = () => {
     if (!editResult) return;
-    // Navigate to transactions with pre-filled data via URL params
     const params = new URLSearchParams();
     params.set('new', 'true');
-    params.set('description', editResult?.description ?? '');
-    params.set('amount', String(editResult?.amount ?? 0));
     if (editResult?.date) params.set('date', editResult.date);
+
+    // Build multi-line items
+    const lineItems = (editResult?.lineItems ?? []).length > 0
+      ? editResult.lineItems!.map((li: OcrLineItem) => ({
+          description: li.description ?? '',
+          amount: String(li.amount ?? 0),
+          categoryId: '',
+        }))
+      : [{
+          description: editResult?.description ?? '',
+          amount: String(editResult?.amount ?? 0),
+          categoryId: '',
+        }];
+
+    params.set('lines', encodeURIComponent(JSON.stringify(lineItems)));
     window.location.href = `/islemler?${params.toString()}`;
   };
 
@@ -242,26 +261,53 @@ export default function BelgelerPage() {
                 Belge başarıyla analiz edildi
               </div>
             </div>
-            <FormField label="Tutar (₺)" type="number" value={String(editResult?.amount ?? 0)}
-              onChange={(e: any) => setEditResult({ ...(editResult ?? {} as OcrResult), amount: parseFloat(e?.target?.value ?? '0') })} />
-            <FormField label="Açıklama" value={editResult?.description ?? ''}
-              onChange={(e: any) => setEditResult({ ...(editResult ?? {} as OcrResult), description: e?.target?.value ?? '' })} />
-            <FormField label="Tarih" type="date" value={editResult?.date ?? ''}
-              onChange={(e: any) => setEditResult({ ...(editResult ?? {} as OcrResult), date: e?.target?.value ?? '' })} />
-            <FormField label="Satıcı" value={editResult?.vendorName ?? ''}
-              onChange={(e: any) => setEditResult({ ...(editResult ?? {} as OcrResult), vendorName: e?.target?.value ?? '' })} />
-            <FormField label="Kategori Önerisi" value={editResult?.category ?? ''}
-              onChange={(e: any) => setEditResult({ ...(editResult ?? {} as OcrResult), category: e?.target?.value ?? '' })} />
-            {(editResult?.items ?? []).length > 0 && (
-              <div>
-                <p className="text-sm font-medium mb-1">Tespit Edilen Kalemler:</p>
-                <div className="flex flex-wrap gap-1">
-                  {(editResult?.items ?? []).map((item: string, i: number) => (
-                    <Badge key={i} variant="secondary" className="text-xs">{item}</Badge>
-                  ))}
-                </div>
+
+            {/* Line items */}
+            <div>
+              <p className="text-sm font-medium mb-2">Tespit Edilen Kalemler:</p>
+              <div className="space-y-2">
+                {(editResult?.lineItems ?? []).length > 0 ? (
+                  (editResult.lineItems ?? []).map((li: OcrLineItem, i: number) => (
+                    <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-muted/50 border">
+                      <div className="flex-1">
+                        <input className="w-full bg-transparent text-sm font-medium border-none outline-none" value={li.description}
+                          onChange={(e: any) => {
+                            const newItems = [...(editResult.lineItems ?? [])];
+                            newItems[i] = { ...newItems[i], description: e?.target?.value ?? '' };
+                            setEditResult({ ...editResult, lineItems: newItems });
+                          }} />
+                        <p className="text-xs text-muted-foreground">{li.category}</p>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <input type="number" className="w-20 text-right bg-transparent text-sm font-mono font-bold border-none outline-none" value={li.amount}
+                          onChange={(e: any) => {
+                            const newItems = [...(editResult.lineItems ?? [])];
+                            newItems[i] = { ...newItems[i], amount: parseFloat(e?.target?.value ?? '0') };
+                            setEditResult({ ...editResult, lineItems: newItems, amount: newItems.reduce((s, item) => s + (item.amount ?? 0), 0) });
+                          }} />
+                        <span className="text-sm">₺</span>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="flex items-center justify-between p-2 rounded-lg bg-muted/50 border">
+                    <input className="flex-1 bg-transparent text-sm border-none outline-none" value={editResult?.description ?? ''}
+                      onChange={(e: any) => setEditResult({ ...editResult, description: e?.target?.value ?? '' })} />
+                    <div className="flex items-center gap-1">
+                      <input type="number" className="w-20 text-right bg-transparent text-sm font-mono font-bold border-none outline-none" value={editResult?.amount ?? 0}
+                        onChange={(e: any) => setEditResult({ ...editResult, amount: parseFloat(e?.target?.value ?? '0') })} />
+                      <span className="text-sm">₺</span>
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
+              <p className="text-right text-sm font-bold mt-2">Toplam: {formatCurrency(editResult?.amount ?? 0)}</p>
+            </div>
+
+            <FormField label="Tarih" type="date" value={editResult?.date ?? ''}
+              onChange={(e: any) => setEditResult({ ...editResult, date: e?.target?.value ?? '' })} />
+            <FormField label="Satıcı" value={editResult?.vendorName ?? ''}
+              onChange={(e: any) => setEditResult({ ...editResult, vendorName: e?.target?.value ?? '' })} />
           </div>
         )}
       </CrudDialog>
