@@ -13,11 +13,11 @@ import { Plus, Pencil, Trash2, Wallet, Building2, CreditCard, Banknote } from 'l
 
 const ACCOUNT_TYPES = [
   { value: 'BANK', label: 'Banka', icon: Building2 },
-  { value: 'CREDIT_CARD', label: 'Kredi Kartı', icon: CreditCard },
   { value: 'CASH', label: 'Nakit', icon: Banknote },
   { value: 'OTHER', label: 'Diğer', icon: Wallet },
 ];
 
+const CURRENCIES = ['TRY', 'USD', 'EUR', 'GBP'];
 const COLORS = ['#10B981', '#3B82F6', '#EF4444', '#F59E0B', '#8B5CF6', '#EC4899', '#06B6D4', '#F97316'];
 
 interface AccForm {
@@ -25,10 +25,12 @@ interface AccForm {
   name: string;
   type: string;
   balance: string;
+  currency: string;
+  bankName: string;
   color: string;
 }
 
-const emptyForm: AccForm = { name: '', type: 'BANK', balance: '0', color: '#10B981' };
+const emptyForm: AccForm = { name: '', type: 'BANK', balance: '0', currency: 'TRY', bankName: '', color: '#10B981' };
 
 export default function HesaplarPage() {
   const [accounts, setAccounts] = useState<any[]>([]);
@@ -44,7 +46,7 @@ export default function HesaplarPage() {
       setLoading(true);
       const res = await fetch('/api/accounts');
       const data = await res.json();
-      setAccounts(data ?? []);
+      setAccounts((data ?? []).filter((a: any) => a?.type !== 'CREDIT_CARD'));
     } catch {
       toast.error('Hesaplar yüklenemedi');
     } finally {
@@ -91,13 +93,18 @@ export default function HesaplarPage() {
 
   const totalBalance = (accounts ?? []).filter((a: any) => a?.isActive).reduce((sum: number, a: any) => sum + (a?.balance ?? 0), 0);
 
+  const getCurrencySymbol = (c: string) => {
+    const map: Record<string, string> = { TRY: '₺', USD: '$', EUR: '€', GBP: '£' };
+    return map[c] ?? c;
+  };
+
   return (
     <div className="space-y-4">
       <FadeIn>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <h1 className="text-2xl font-display font-bold tracking-tight">Hesaplar</h1>
-            <p className="text-sm text-muted-foreground">Banka, kredi kartı ve nakit hesaplarınız</p>
+            <p className="text-sm text-muted-foreground">Banka ve nakit hesaplarınız</p>
           </div>
           <Button onClick={() => { setForm({ ...emptyForm }); setDialogOpen(true); }} className="bg-emerald-500 hover:bg-emerald-600 text-white">
             <Plus size={16} className="mr-1" /> Yeni Hesap
@@ -105,7 +112,6 @@ export default function HesaplarPage() {
         </div>
       </FadeIn>
 
-      {/* Total */}
       <FadeIn delay={0.1}>
         <Card className="bg-gradient-to-r from-emerald-500 to-emerald-600 text-white">
           <CardContent className="p-4">
@@ -118,7 +124,7 @@ export default function HesaplarPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {loading ? (
           Array.from({ length: 3 }).map((_, i: number) => (
-            <Card key={i}><CardContent className="p-4"><div className="h-16 bg-muted/50 rounded animate-pulse" /></CardContent></Card>
+            <Card key={i}><CardContent className="p-4"><div className="h-20 bg-muted/50 rounded animate-pulse" /></CardContent></Card>
           ))
         ) : (accounts ?? []).length === 0 ? (
           <div className="col-span-full text-center py-8 text-muted-foreground">
@@ -140,11 +146,12 @@ export default function HesaplarPage() {
                         <div>
                           <p className="font-medium text-sm">{a?.name}</p>
                           <p className="text-xs text-muted-foreground">{getAccountTypeLabel(a?.type)}</p>
+                          {a?.bankName && <p className="text-xs text-muted-foreground">{a.bankName}</p>}
                         </div>
                       </div>
                       <div className="flex gap-1">
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => {
-                          setForm({ id: a?.id, name: a?.name ?? '', type: a?.type ?? 'BANK', balance: String(a?.balance ?? 0), color: a?.color ?? '#10B981' });
+                          setForm({ id: a?.id, name: a?.name ?? '', type: a?.type ?? 'BANK', balance: String(a?.balance ?? 0), currency: a?.currency ?? 'TRY', bankName: a?.bankName ?? '', color: a?.color ?? '#10B981' });
                           setDialogOpen(true);
                         }}>
                           <Pencil size={14} />
@@ -154,9 +161,14 @@ export default function HesaplarPage() {
                         </Button>
                       </div>
                     </div>
-                    <p className={`mt-3 text-lg font-bold font-mono ${(a?.balance ?? 0) >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
-                      {formatCurrency(a?.balance)}
-                    </p>
+                    <div className="mt-3 flex items-end justify-between">
+                      <p className={`text-lg font-bold font-mono ${(a?.balance ?? 0) >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                        {formatCurrency(a?.balance)}
+                      </p>
+                      {a?.currency !== 'TRY' && (
+                        <span className="text-xs bg-muted px-2 py-0.5 rounded font-medium">{getCurrencySymbol(a?.currency)} {a?.currency}</span>
+                      )}
+                    </div>
                   </CardContent>
                 </Card>
               </SlideIn>
@@ -166,10 +178,18 @@ export default function HesaplarPage() {
       </div>
 
       <CrudDialog open={dialogOpen} onClose={() => { setDialogOpen(false); setForm({ ...emptyForm }); }} title={form.id ? 'Hesap Düzenle' : 'Yeni Hesap'} onSave={handleSave} saving={saving}>
-        <FormField label="Hesap Adı" required value={form.name} onChange={(e: any) => setForm({ ...form, name: e?.target?.value ?? '' })} placeholder="Örn: Ziraat Bankası" />
+        <FormField label="Hesap Adı" required value={form.name} onChange={(e: any) => setForm({ ...form, name: e?.target?.value ?? '' })} placeholder="Örn: Ziraat Vadesiz" />
         <FormField label="Hesap Türü" required>
           <select className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" value={form.type} onChange={(e: any) => setForm({ ...form, type: e?.target?.value ?? 'BANK' })}>
             {ACCOUNT_TYPES.map((t: any) => <option key={t?.value} value={t?.value}>{t?.label}</option>)}
+          </select>
+        </FormField>
+        {form.type === 'BANK' && (
+          <FormField label="Banka Adı" value={form.bankName} onChange={(e: any) => setForm({ ...form, bankName: e?.target?.value ?? '' })} placeholder="Örn: Ziraat Bankası" />
+        )}
+        <FormField label="Para Birimi">
+          <select className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" value={form.currency} onChange={(e: any) => setForm({ ...form, currency: e?.target?.value ?? 'TRY' })}>
+            {CURRENCIES.map((c: string) => <option key={c} value={c}>{c} ({getCurrencySymbol(c)})</option>)}
           </select>
         </FormField>
         <FormField label="Başlangıç Bakiye (₺)" type="number" value={form.balance} onChange={(e: any) => setForm({ ...form, balance: e?.target?.value ?? '0' })} />

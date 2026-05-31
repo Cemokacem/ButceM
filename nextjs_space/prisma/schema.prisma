@@ -15,6 +15,7 @@ model Account {
   type        String   // BANK, CREDIT_CARD, CASH, OTHER
   balance     Float    @default(0)
   currency    String   @default("TRY")
+  bankName    String?  // Banka adı
   color       String   @default("#10B981")
   icon        String   @default("wallet")
   isActive    Boolean  @default(true)
@@ -22,8 +23,94 @@ model Account {
   updatedAt   DateTime @updatedAt
   transactions Transaction[]
   installments Installment[]
+  creditCards  CreditCard[]
+  plannedPayments PlannedPayment[]
+  subscriptions Subscription[]
 
   @@index([type])
+}
+
+model CreditCard {
+  id              String   @id @default(cuid())
+  name            String
+  cardNumber      String?  // Son 4 hane
+  cardNetwork     String   @default("VISA") // VISA, MASTERCARD, TROY, OTHER
+  cardTier        String   @default("NORMAL") // NORMAL, GOLD, PLATINUM, PREMIUM
+  limitAmount     Float    @default(0)
+  usedAmount      Float    @default(0)
+  interestRate    Float    @default(0)
+  billingDay      Int      @default(1)  // Hesap kesim günü
+  paymentDay      Int      @default(10) // Ödeme günü
+  autoPayment     Boolean  @default(false)
+  accountId       String
+  account         Account  @relation(fields: [accountId], references: [id])
+  color           String   @default("#3B82F6")
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([accountId])
+}
+
+model PlannedPayment {
+  id          String   @id @default(cuid())
+  description String
+  amount      Float
+  type        String   @default("EXPENSE") // INCOME, EXPENSE
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id])
+  accountId   String
+  account     Account  @relation(fields: [accountId], references: [id])
+  dueDate     DateTime
+  isRecurring Boolean  @default(false)
+  frequency   String?  // WEEKLY, MONTHLY, YEARLY
+  isPaid      Boolean  @default(false)
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([dueDate])
+  @@index([isPaid])
+}
+
+model Subscription {
+  id          String   @id @default(cuid())
+  name        String
+  amount      Float
+  frequency   String   @default("MONTHLY") // MONTHLY, YEARLY
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id])
+  accountId   String
+  account     Account  @relation(fields: [accountId], references: [id])
+  startDate   DateTime
+  nextPayDate DateTime
+  color       String   @default("#F59E0B")
+  isActive    Boolean  @default(true)
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isActive])
+  @@index([nextPayDate])
+}
+
+model Budget {
+  id          String   @id @default(cuid())
+  name        String
+  amount      Float    // Bütçe limiti
+  spent       Float    @default(0)
+  period      String   @default("MONTHLY") // WEEKLY, MONTHLY
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id])
+  startDate   DateTime
+  endDate     DateTime
+  color       String   @default("#10B981")
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isActive])
+  @@index([period])
 }
 
 model Category {
@@ -36,6 +123,9 @@ model Category {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   transactions Transaction[]
+  plannedPayments PlannedPayment[]
+  subscriptions Subscription[]
+  budgets     Budget[]
 
   @@index([type])
 }

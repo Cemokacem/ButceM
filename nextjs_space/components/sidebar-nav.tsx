@@ -17,16 +17,33 @@ import {
   Menu,
   X,
   ChevronLeft,
+  CalendarDays,
+  CalendarClock,
+  Bell,
+  Target,
+  ChevronDown,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-const navItems = [
+interface NavItem {
+  href: string;
+  label: string;
+  icon: any;
+  children?: NavItem[];
+}
+
+const navItems: NavItem[] = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/islemler', label: 'İşlemler', icon: ArrowLeftRight },
+  { href: '/takvim', label: 'Takvim', icon: CalendarDays },
   { href: '/kategoriler', label: 'Kategoriler', icon: Tag },
   { href: '/hesaplar', label: 'Hesaplar', icon: Wallet },
+  { href: '/kredi-kartlari', label: 'Kredi Kartları', icon: CreditCard },
   { href: '/borc-alacak', label: 'Borç/Alacak', icon: HandCoins },
   { href: '/taksitler', label: 'Taksitler', icon: CreditCard },
+  { href: '/plan/planlanmis-odemeler', label: 'Planlı Ödemeler', icon: CalendarClock },
+  { href: '/plan/abonelikler', label: 'Abonelikler', icon: Bell },
+  { href: '/butceler', label: 'Bütçeler', icon: Target },
   { href: '/saticilar', label: 'Satıcılar', icon: Users },
   { href: '/belgeler', label: 'Belgeler', icon: FileText },
   { href: '/raporlar', label: 'Raporlar', icon: BarChart3 },

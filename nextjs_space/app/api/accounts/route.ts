@@ -16,7 +16,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, type, balance, currency, color, icon } = body ?? {};
+    const { name, type, balance, currency, bankName, color, icon } = body ?? {};
     if (!name || !type) return NextResponse.json({ error: 'Ad ve tür zorunlu' }, { status: 400 });
 
     const account = await prisma.account.create({
@@ -25,6 +25,7 @@ export async function POST(request: NextRequest) {
         type,
         balance: balance ? parseFloat(balance) : 0,
         currency: currency ?? 'TRY',
+        bankName: bankName ?? null,
         color: color ?? '#10B981',
         icon: icon ?? 'wallet',
       },
@@ -47,6 +48,7 @@ export async function PUT(request: NextRequest) {
     if (type !== undefined) data.type = type;
     if (balance !== undefined) data.balance = parseFloat(balance);
     if (currency !== undefined) data.currency = currency;
+    if (body?.bankName !== undefined) data.bankName = body.bankName;
     if (color !== undefined) data.color = color;
     if (icon !== undefined) data.icon = icon;
     if (isActive !== undefined) data.isActive = isActive;
