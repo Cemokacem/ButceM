@@ -8,8 +8,8 @@ import { DeleteConfirm } from '@/components/delete-confirm';
 import { FormField } from '@/components/form-field';
 import { FadeIn, SlideIn } from '@/components/ui/animate';
 import { toast } from 'sonner';
-import { formatCurrency } from '@/lib/format';
-import { Plus, Pencil, Trash2, CreditCard, Shield, Sparkles } from 'lucide-react';
+import { formatCurrency, formatDate, getAccountTypeLabel } from '@/lib/format';
+import { Plus, Pencil, Trash2, CreditCard, Shield, Sparkles, ChevronDown, ChevronRight, FileText, Receipt } from 'lucide-react';
 
 const CARD_NETWORKS = [
   { value: 'VISA', label: 'Visa' },
@@ -44,6 +44,17 @@ interface CardForm {
   color: string;
 }
 
+interface DocGroup {
+  groupId: string;
+  vendorName: string;
+  date: string;
+  type: string;
+  total: number;
+  groupLabel: string | null;
+  documentNo: string | null;
+  itemCount: number;
+}
+
 const emptyForm: CardForm = {
   name: '', cardNumber: '', cardNetwork: 'VISA', cardTier: 'NORMAL',
   limitAmount: '0', usedAmount: '0', interestRate: '0',
@@ -54,12 +65,17 @@ const emptyForm: CardForm = {
 export default function KrediKartlariPage() {
   const [cards, setCards] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
+  const [ccAccounts, setCcAccounts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteId, setDeleteId] = useState('');
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<CardForm>({ ...emptyForm });
+  const [expandedCardId, setExpandedCardId] = useState<string | null>(null);
+  const [docGroups, setDocGroups] = useState<DocGroup[]>([]);
+  const [docLoading, setDocLoading] = useState(false);
+  const [docTotals, setDocTotals] = useState({ income: 0, expense: 0 });
 
   const load = useCallback(async () => {
     try {
@@ -72,6 +88,7 @@ export default function KrediKartlariPage() {
       const accData = await accRes.json();
       setCards(cardsData ?? []);
       setAccounts((accData ?? []).filter((a: any) => a?.type === 'BANK'));
+      setCcAccounts((accData ?? []).filter((a: any) => a?.type === 'CREDIT_CARD'));
     } catch {
       toast.error('Veriler yüklenemedi');
     } finally {
@@ -80,6 +97,73 @@ export default function KrediKartlariPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Find the matching CREDIT_CARD account for a CreditCard record
+  const findCcAccount = (card: any) => {
+    // Try to match by name (case-insensitive, partial match)
+    return ccAccounts.find((acc: any) => {
+      const cardName = (card?.name ?? '').toLowerCase().trim();
+      const accName = (acc?.name ?? '').toLowerCase().trim();
+      return cardName === accName || accName.includes(cardName) || cardName.includes(accName);
+    });
+  };
+
+  const loadCardTransactions = useCallback(async (accountId: string) => {
+    setDocLoading(true);
+    try {
+      const res = await fetch(`/api/transactions?accountId=${accountId}&limit=500`);
+      const data = await res.json();
+      const txs = data?.transactions ?? [];
+
+      const groupMap = new Map<string, DocGroup>();
+      let totalIncome = 0;
+      let totalExpense = 0;
+
+      for (const tx of txs) {
+        const key = tx.groupId || `single_${tx.id}`;
+        if (!groupMap.has(key)) {
+          groupMap.set(key, {
+            groupId: key,
+            vendorName: tx.vendor?.name || tx.groupLabel || tx.description || 'İşlem',
+            date: tx.date,
+            type: tx.type,
+            total: 0,
+            groupLabel: tx.groupLabel || null,
+            documentNo: tx.documentNo || null,
+            itemCount: 0,
+          });
+        }
+        const group = groupMap.get(key)!;
+        group.total += tx.amount ?? 0;
+        group.itemCount += 1;
+
+        if (tx.type === 'INCOME') totalIncome += tx.amount ?? 0;
+        else if (tx.type === 'EXPENSE') totalExpense += tx.amount ?? 0;
+      }
+
+      setDocGroups(Array.from(groupMap.values()).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+      setDocTotals({ income: totalIncome, expense: totalExpense });
+    } catch {
+      toast.error('İşlemler yüklenemedi');
+    } finally {
+      setDocLoading(false);
+    }
+  }, []);
+
+  const toggleCardExpand = (cardId: string, ccAccountId: string | undefined) => {
+    if (expandedCardId === cardId) {
+      setExpandedCardId(null);
+      setDocGroups([]);
+    } else {
+      setExpandedCardId(cardId);
+      if (ccAccountId) {
+        loadCardTransactions(ccAccountId);
+      } else {
+        setDocGroups([]);
+        setDocLoading(false);
+      }
+    }
+  };
 
   const handleSave = async () => {
     if (!form.name) { toast.error('Kart adı zorunlu'); return; }
@@ -129,6 +213,73 @@ export default function KrediKartlariPage() {
     return `${start.toLocaleDateString('tr-TR')} - ${end.toLocaleDateString('tr-TR')}`;
   };
 
+  // Render document summary section (shared between card and standalone cc account)
+  const renderDocSummary = (isLoading: boolean, groups: DocGroup[], totals: { income: number; expense: number }, noAccountMsg?: string) => {
+    if (noAccountMsg) {
+      return <p className="text-sm text-muted-foreground text-center py-3">{noAccountMsg}</p>;
+    }
+    if (isLoading) {
+      return (
+        <div className="space-y-2">
+          {Array.from({ length: 3 }).map((_, j) => (
+            <div key={j} className="h-10 bg-muted/50 rounded animate-pulse" />
+          ))}
+        </div>
+      );
+    }
+    if (groups.length === 0) {
+      return <p className="text-sm text-muted-foreground text-center py-3">Bu karta ait işlem bulunamadı</p>;
+    }
+    return (
+      <>
+        <div className="grid grid-cols-2 gap-2 mb-3">
+          <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-2 text-center">
+            <p className="text-xs text-muted-foreground">Toplam Gelir</p>
+            <p className="text-sm font-bold text-emerald-600 font-mono">{formatCurrency(totals.income)}</p>
+          </div>
+          <div className="bg-red-50 dark:bg-red-900/20 rounded-lg p-2 text-center">
+            <p className="text-xs text-muted-foreground">Toplam Gider</p>
+            <p className="text-sm font-bold text-red-500 font-mono">{formatCurrency(totals.expense)}</p>
+          </div>
+        </div>
+
+        <p className="text-xs text-muted-foreground mb-2 flex items-center gap-1">
+          <FileText size={12} /> Belge Bazlı Hareketler ({groups.length} belge)
+        </p>
+
+        <div className="space-y-1 max-h-[400px] overflow-y-auto">
+          {groups.map((group) => (
+            <div key={group.groupId} className="flex items-center justify-between p-2 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <Receipt size={14} className={`flex-shrink-0 ${group.type === 'INCOME' ? 'text-emerald-500' : group.type === 'TRANSFER' ? 'text-blue-500' : 'text-red-400'}`} />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <p className="text-sm font-medium truncate">{group.vendorName}</p>
+                    {group.groupLabel && (
+                      <span className="text-[10px] bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 px-1 py-0.5 rounded">
+                        {group.groupLabel}
+                      </span>
+                    )}
+                    {group.itemCount > 1 && (
+                      <span className="text-[10px] bg-muted px-1 py-0.5 rounded text-muted-foreground">{group.itemCount} kalem</span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    {formatDate(group.date)}
+                    {group.documentNo && <span> • No: {group.documentNo}</span>}
+                  </p>
+                </div>
+              </div>
+              <p className={`text-sm font-bold font-mono flex-shrink-0 ml-2 ${group.type === 'INCOME' ? 'text-emerald-500' : group.type === 'TRANSFER' ? 'text-blue-500' : 'text-red-500'}`}>
+                {group.type === 'INCOME' ? '+' : group.type === 'TRANSFER' ? '' : '-'}{formatCurrency(Math.abs(group.total))}
+              </p>
+            </div>
+          ))}
+        </div>
+      </>
+    );
+  };
+
   return (
     <div className="space-y-4">
       <FadeIn>
@@ -157,6 +308,8 @@ export default function KrediKartlariPage() {
           cards.map((c: any, i: number) => {
             const TierIcon = getTierIcon(c?.cardTier);
             const usedPct = c?.limitAmount > 0 ? Math.min(100, ((c?.usedAmount ?? 0) / c.limitAmount) * 100) : 0;
+            const matchedAccount = findCcAccount(c);
+            const isExpanded = expandedCardId === c?.id;
             return (
               <SlideIn key={c?.id} from="bottom" delay={i * 0.05}>
                 <Card className="overflow-hidden">
@@ -207,6 +360,31 @@ export default function KrediKartlariPage() {
                       <span className="text-muted-foreground">Periyot: {currentBillingPeriod(c)}</span>
                       {c?.autoPayment && <span className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 px-2 py-0.5 rounded">Otomatik ödeme</span>}
                     </div>
+
+                    {/* Expandable document summary toggle */}
+                    <div
+                      className="flex items-center gap-2 pt-2 border-t cursor-pointer hover:bg-accent/30 rounded px-2 py-1.5 -mx-2 transition-colors"
+                      onClick={() => toggleCardExpand(c?.id, matchedAccount?.id)}
+                    >
+                      <Receipt size={14} className="text-blue-500" />
+                      <span className="text-sm font-medium flex-1">
+                        Belge Hareketleri
+                        {matchedAccount && <span className="text-xs text-muted-foreground ml-1">({matchedAccount.name})</span>}
+                      </span>
+                      {isExpanded ? <ChevronDown size={16} className="text-muted-foreground" /> : <ChevronRight size={16} className="text-muted-foreground" />}
+                    </div>
+
+                    {isExpanded && (
+                      <div className="pt-1">
+                        {renderDocSummary(
+                          docLoading,
+                          docGroups,
+                          docTotals,
+                          !matchedAccount ? 'Eşleşen kredi kartı hesabı bulunamadı. Hesaplar bölümünde aynı isimle bir "Kredi Kartı" türünde hesap oluşturun.' : undefined
+                        )}
+                      </div>
+                    )}
+
                     <div className="flex justify-end gap-1 pt-1 border-t">
                       <Button variant="ghost" size="sm" onClick={() => {
                         setForm({
@@ -231,6 +409,35 @@ export default function KrediKartlariPage() {
           })
         )}
       </div>
+
+      {/* Standalone CREDIT_CARD accounts without matching CreditCard records */}
+      {!loading && ccAccounts.length > 0 && (() => {
+        const unmatchedAccounts = ccAccounts.filter((acc: any) =>
+          !cards.some((card: any) => {
+            const cardName = (card?.name ?? '').toLowerCase().trim();
+            const accName = (acc?.name ?? '').toLowerCase().trim();
+            return cardName === accName || accName.includes(cardName) || cardName.includes(accName);
+          })
+        );
+        if (unmatchedAccounts.length === 0) return null;
+        return (
+          <FadeIn delay={0.2}>
+            <div className="space-y-3">
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <CreditCard size={18} className="text-blue-500" />
+                Kredi Kartı Hesap Hareketleri
+              </h2>
+              <p className="text-xs text-muted-foreground -mt-2">Kart detayı olmayan kredi kartı hesapları</p>
+              {unmatchedAccounts.map((acc: any) => (
+                <CcAccountCard
+                  key={acc.id}
+                  account={acc}
+                />
+              ))}
+            </div>
+          </FadeIn>
+        );
+      })()}
 
       <CrudDialog open={dialogOpen} onClose={() => { setDialogOpen(false); setForm({ ...emptyForm }); }} title={form.id ? 'Kredi Kartını Düzenle' : 'Yeni Kredi Kartı'} onSave={handleSave} saving={saving}>
         <FormField label="İsim" required value={form.name} onChange={(e: any) => setForm({ ...form, name: e?.target?.value ?? '' })} placeholder="Kredi kartı" />
@@ -289,5 +496,135 @@ export default function KrediKartlariPage() {
 
       <DeleteConfirm open={deleteOpen} onClose={() => setDeleteOpen(false)} onConfirm={handleDelete} />
     </div>
+  );
+}
+
+// Separate component for standalone CC accounts with their own loading state
+function CcAccountCard({ account }: { account: any }) {
+  const [expanded, setExpanded] = useState(false);
+  const [groups, setGroups] = useState<DocGroup[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [totals, setTotals] = useState({ income: 0, expense: 0 });
+
+  const loadTxs = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/transactions?accountId=${account.id}&limit=500`);
+      const data = await res.json();
+      const txs = data?.transactions ?? [];
+
+      const groupMap = new Map<string, DocGroup>();
+      let totalIncome = 0;
+      let totalExpense = 0;
+
+      for (const tx of txs) {
+        const key = tx.groupId || `single_${tx.id}`;
+        if (!groupMap.has(key)) {
+          groupMap.set(key, {
+            groupId: key,
+            vendorName: tx.vendor?.name || tx.groupLabel || tx.description || 'İşlem',
+            date: tx.date,
+            type: tx.type,
+            total: 0,
+            groupLabel: tx.groupLabel || null,
+            documentNo: tx.documentNo || null,
+            itemCount: 0,
+          });
+        }
+        const group = groupMap.get(key)!;
+        group.total += tx.amount ?? 0;
+        group.itemCount += 1;
+
+        if (tx.type === 'INCOME') totalIncome += tx.amount ?? 0;
+        else if (tx.type === 'EXPENSE') totalExpense += tx.amount ?? 0;
+      }
+
+      setGroups(Array.from(groupMap.values()).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+      setTotals({ income: totalIncome, expense: totalExpense });
+    } catch {
+      toast.error('İşlemler yüklenemedi');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggle = () => {
+    if (!expanded) loadTxs();
+    setExpanded(!expanded);
+  };
+
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <div className="flex items-center gap-3 cursor-pointer" onClick={toggle}>
+          <div className="p-2 rounded-lg" style={{ backgroundColor: `${account.color ?? '#3B82F6'}20` }}>
+            <CreditCard size={18} style={{ color: account.color ?? '#3B82F6' }} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-medium text-sm">{account.name}</p>
+            <p className="text-xs text-muted-foreground">Bakiye: <span className={`font-mono font-medium ${(account.balance ?? 0) >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{formatCurrency(account.balance)}</span></p>
+          </div>
+          {expanded ? <ChevronDown size={16} className="text-muted-foreground" /> : <ChevronRight size={16} className="text-muted-foreground" />}
+        </div>
+        {expanded && (
+          <div className="mt-3 pt-3 border-t">
+            {loading ? (
+              <div className="space-y-2">
+                {Array.from({ length: 3 }).map((_, j) => (
+                  <div key={j} className="h-10 bg-muted/50 rounded animate-pulse" />
+                ))}
+              </div>
+            ) : groups.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-3">Bu hesaba ait işlem bulunamadı</p>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-2 text-center">
+                    <p className="text-xs text-muted-foreground">Toplam Gelir</p>
+                    <p className="text-sm font-bold text-emerald-600 font-mono">{formatCurrency(totals.income)}</p>
+                  </div>
+                  <div className="bg-red-50 dark:bg-red-900/20 rounded-lg p-2 text-center">
+                    <p className="text-xs text-muted-foreground">Toplam Gider</p>
+                    <p className="text-sm font-bold text-red-500 font-mono">{formatCurrency(totals.expense)}</p>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground mb-2 flex items-center gap-1">
+                  <FileText size={12} /> Belge Bazlı Hareketler ({groups.length} belge)
+                </p>
+                <div className="space-y-1 max-h-[400px] overflow-y-auto">
+                  {groups.map((group) => (
+                    <div key={group.groupId} className="flex items-center justify-between p-2 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <Receipt size={14} className={`flex-shrink-0 ${group.type === 'INCOME' ? 'text-emerald-500' : group.type === 'TRANSFER' ? 'text-blue-500' : 'text-red-400'}`} />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <p className="text-sm font-medium truncate">{group.vendorName}</p>
+                            {group.groupLabel && (
+                              <span className="text-[10px] bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 px-1 py-0.5 rounded">
+                                {group.groupLabel}
+                              </span>
+                            )}
+                            {group.itemCount > 1 && (
+                              <span className="text-[10px] bg-muted px-1 py-0.5 rounded text-muted-foreground">{group.itemCount} kalem</span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-muted-foreground">
+                            {formatDate(group.date)}
+                            {group.documentNo && <span> • No: {group.documentNo}</span>}
+                          </p>
+                        </div>
+                      </div>
+                      <p className={`text-sm font-bold font-mono flex-shrink-0 ml-2 ${group.type === 'INCOME' ? 'text-emerald-500' : group.type === 'TRANSFER' ? 'text-blue-500' : 'text-red-500'}`}>
+                        {group.type === 'INCOME' ? '+' : group.type === 'TRANSFER' ? '' : '-'}{formatCurrency(Math.abs(group.total))}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
