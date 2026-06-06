@@ -24,7 +24,7 @@ interface DashboardProps {
   prevMonthIncome: number;
   prevMonthExpense: number;
   accounts: Array<{ id: string; name: string; type: string; balance: number; currency: string; color: string; bankName: string | null }>;
-  creditCards: Array<{ id: string; name: string; limitAmount: number; usedAmount: number; color: string; cardNetwork: string }>;
+  creditCardAccounts: Array<{ id: string; name: string; balance: number; color: string }>;
   recentTransactions: Array<{
     id: string; type: string; amount: number; description: string;
     date: string; categoryName: string | null; categoryColor: string | null;
@@ -57,7 +57,7 @@ export function DashboardClient(props: DashboardProps) {
   const {
     totalBalance, totalCreditCardUsed, netBalance,
     monthlyIncome, monthlyExpense, prevMonthIncome, prevMonthExpense,
-    accounts, creditCards, recentTransactions, categoryBreakdown,
+    accounts, creditCardAccounts, recentTransactions, categoryBreakdown,
     last7Days, balanceTrend, budgets, cashFlow
   } = props;
 
@@ -187,7 +187,7 @@ export function DashboardClient(props: DashboardProps) {
           </FadeIn>
 
           {/* Kredi Kartları */}
-          {creditCards.length > 0 && (
+          {creditCardAccounts.length > 0 && (
             <FadeIn delay={0.15}>
               <Card>
                 <CardHeader className="pb-2 flex flex-row items-center justify-between">
@@ -196,22 +196,18 @@ export function DashboardClient(props: DashboardProps) {
                 </CardHeader>
                 <CardContent className="pt-0">
                   <div className="space-y-3">
-                    {creditCards.map(card => {
-                      const usedPercent = card.limitAmount > 0 ? Math.round((card.usedAmount / card.limitAmount) * 100) : 0;
+                    {creditCardAccounts.map(ccAcc => {
+                      const used = Math.abs(Math.min(0, ccAcc.balance));
                       return (
-                        <div key={card.id}>
+                        <div key={ccAcc.id}>
                           <div className="flex items-center justify-between mb-1">
                             <div className="flex items-center gap-2">
-                              <CreditCard size={14} style={{ color: card.color }} />
-                              <p className="text-sm font-medium">{card.name}</p>
+                              <CreditCard size={14} style={{ color: ccAcc.color }} />
+                              <p className="text-sm font-medium">{ccAcc.name}</p>
                             </div>
-                            <span className="text-sm font-mono font-semibold text-red-500">-{formatCurrency(card.usedAmount)}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                              <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(usedPercent, 100)}%`, backgroundColor: card.color }} />
-                            </div>
-                            <span className="text-xs text-muted-foreground">%{usedPercent}</span>
+                            <span className={`text-sm font-mono font-semibold ${ccAcc.balance < 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                              {formatCurrency(ccAcc.balance)}
+                            </span>
                           </div>
                         </div>
                       );

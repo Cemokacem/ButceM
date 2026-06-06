@@ -126,21 +126,11 @@ export default async function DashboardPage() {
     currency: a?.currency ?? 'TRY', color: a?.color ?? '#10B981', bankName: a?.bankName ?? null,
   }));
 
-  const serializedCreditCards = (creditCards ?? []).map((c: any) => {
-    // Try to match with CREDIT_CARD account to get actual used amount from balance
-    const cardName = (c?.name ?? '').toLowerCase().trim();
-    const matchedAccount = ccAccounts.find((acc: any) => {
-      const accName = (acc?.name ?? '').toLowerCase().trim();
-      return cardName === accName || accName.includes(cardName) || cardName.includes(accName);
-    });
-    // Used amount = abs of negative balance from matched account, or fallback to model value
-    const actualUsed = matchedAccount ? Math.abs(Math.min(0, matchedAccount.balance ?? 0)) : (c?.usedAmount ?? 0);
-    return {
-      id: c?.id ?? '', name: c?.name ?? '', limitAmount: c?.limitAmount ?? 0,
-      usedAmount: actualUsed, color: c?.color ?? '#3B82F6',
-      cardNetwork: c?.cardNetwork ?? 'VISA',
-    };
-  });
+  // Use CREDIT_CARD accounts directly for dashboard - they have the real balances
+  const serializedCcAccounts = ccAccounts.map((a: any) => ({
+    id: a?.id ?? '', name: a?.name ?? '', balance: a?.balance ?? 0,
+    color: a?.color ?? '#3B82F6',
+  }));
 
   const serializedTransactions = (recentTransactions ?? []).map((t: any) => ({
     id: t?.id ?? '', type: t?.type ?? '', amount: t?.amount ?? 0,
@@ -176,7 +166,7 @@ export default async function DashboardPage() {
       prevMonthIncome={prevMonthIncome}
       prevMonthExpense={prevMonthExpense}
       accounts={serializedAccounts}
-      creditCards={serializedCreditCards}
+      creditCardAccounts={serializedCcAccounts}
       recentTransactions={serializedTransactions}
       categoryBreakdown={categoryBreakdown}
       last7Days={last7Days}

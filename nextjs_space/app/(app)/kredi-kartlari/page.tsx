@@ -98,14 +98,39 @@ export default function KrediKartlariPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Find the matching CREDIT_CARD account for a CreditCard record
+  // Find the best matching CREDIT_CARD account for a CreditCard record
   const findCcAccount = (card: any) => {
-    // Try to match by name (case-insensitive, partial match)
-    return ccAccounts.find((acc: any) => {
-      const cardName = (card?.name ?? '').toLowerCase().trim();
+    const cardName = (card?.name ?? '').toLowerCase().trim();
+    const linkedBankName = (card?.account?.name ?? '').toLowerCase().trim();
+    
+    // Score each CC account for match quality
+    let bestMatch: any = null;
+    let bestScore = 0;
+    
+    for (const acc of ccAccounts) {
       const accName = (acc?.name ?? '').toLowerCase().trim();
-      return cardName === accName || accName.includes(cardName) || cardName.includes(accName);
-    });
+      let score = 0;
+      
+      // Direct name match
+      if (cardName === accName) { score = 100; }
+      else if (accName.includes(cardName) || cardName.includes(accName)) { score = 80; }
+      else {
+        // Word-level matching between both card name and linked bank name vs cc account name
+        const allSourceWords = new Set([...cardName.split(/\s+/), ...linkedBankName.split(/\s+/)].filter((w: string) => w.length > 2));
+        const accWords = accName.split(/\s+/).filter((w: string) => w.length > 2);
+        // Count unique meaningful word matches (excluding generic words like 'kredi', 'kartı', 'kart')
+        const genericWords = new Set(['kredi', 'kartı', 'kart', 'kartı']);
+        const meaningfulMatches = accWords.filter((aw: string) => !genericWords.has(aw) && allSourceWords.has(aw));
+        score = meaningfulMatches.length * 30;
+      }
+      
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = acc;
+      }
+    }
+    
+    return bestScore >= 30 ? bestMatch : null;
   };
 
   const loadCardTransactions = useCallback(async (accountId: string) => {
