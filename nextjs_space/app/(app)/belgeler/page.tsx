@@ -27,6 +27,7 @@ interface OcrResult {
   date: string;
   vendorName: string;
   category: string;
+  documentNo?: string;
   items: string[];
   lineItems?: OcrLineItem[];
 }
@@ -178,6 +179,8 @@ export default function BelgelerPage() {
     params.set('new', 'true');
     if (editResult?.date) params.set('date', editResult.date);
     if (editResult?.vendorName) params.set('vendorName', editResult.vendorName);
+    if (editResult?.category) params.set('groupLabel', editResult.category);
+    if (editResult?.documentNo) params.set('documentNo', editResult.documentNo);
 
     // Build multi-line items
     const lineItems = (editResult?.lineItems ?? []).length > 0
@@ -305,10 +308,18 @@ export default function BelgelerPage() {
               <p className="text-right text-sm font-bold mt-2">Toplam: {formatCurrency(editResult?.amount ?? 0)}</p>
             </div>
 
-            <FormField label="Tarih" type="date" value={editResult?.date ?? ''}
-              onChange={(e: any) => setEditResult({ ...editResult, date: e?.target?.value ?? '' })} />
-            <FormField label="Satıcı" value={editResult?.vendorName ?? ''}
-              onChange={(e: any) => setEditResult({ ...editResult, vendorName: e?.target?.value ?? '' })} />
+            <div className="grid grid-cols-2 gap-3">
+              <FormField label="Satıcı" value={editResult?.vendorName ?? ''}
+                onChange={(e: any) => setEditResult({ ...editResult, vendorName: e?.target?.value ?? '' })} />
+              <FormField label="Belge Kategorisi" value={editResult?.category ?? ''}
+                onChange={(e: any) => setEditResult({ ...editResult, category: e?.target?.value ?? '' })} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <FormField label="Tarih" type="date" value={editResult?.date ?? ''}
+                onChange={(e: any) => setEditResult({ ...editResult, date: e?.target?.value ?? '' })} />
+              <FormField label="Belge No" value={editResult?.documentNo ?? ''}
+                onChange={(e: any) => setEditResult({ ...editResult, documentNo: e?.target?.value ?? '' })} />
+            </div>
           </div>
         )}
       </CrudDialog>

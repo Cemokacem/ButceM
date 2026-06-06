@@ -27,17 +27,23 @@ JSON formatında yanıt ver:
   "amount": 0,
   "description": "Ürün/hizmet açıklaması",
   "date": "YYYY-MM-DD",
-  "vendorName": "Satıcı/mağaza adı",
-  "category": "Genel kategori önerisi",
+  "vendorName": "Satıcı/mağaza adı (ör: BİM, A101, Migros, Shell)",
+  "category": "Belge kategorisi (ör: Market, Restoran, Akaryakıt, Fatura, Giyim, Teknoloji)",
+  "documentNo": "Fiş/fatura numarası (varsa)",
   "items": ["kalem1", "kalem2"],
   "lineItems": [
-    { "description": "Kalem adı/açıklaması", "amount": 100.00, "category": "Kategori önerisi (Market, Yemek, Ulaşım, Sağlık, Eğitim, Giyim, Teknoloji, Ev, Fatura, Diğer)" },
-    { "description": "Diğer kalem", "amount": 50.00, "category": "Kategori" }
+    { "description": "Kalem adı/açıklaması", "amount": 100.00, "category": "Alt kategori (ör: Gıda, Kozmetik, İçecek, Temizlik, Yakıt, Diğer)" },
+    { "description": "Diğer kalem", "amount": 50.00, "category": "Alt kategori" }
   ]
 }
 
-ÖNEMLİ: Belgede birden fazla kalem/ürün varsa, her birini ayrı ayrı lineItems içinde listele. Her kalemin kendi tutarı ve açıklaması olsun. amount tüm kalemlerin toplamı olsun.
-Sadece JSON olarak yanıt ver, başka hiçbir şey ekleme. Eğer bilgi bulunamazsa ilgili alanı boş bırak veya 0 yap.`;
+ÖNEMLİ:
+- vendorName: Belgede yazan satıcı/mağaza/firma adını yaz (ürün adı değil).
+- category: Belgenin genel kategorisi (Market, Restoran, Akaryakıt vb.)
+- documentNo: Fiş veya fatura numarası (varsa)
+- lineItems: Belgede birden fazla kalem/ürün varsa her birini ayrı listele. Her kalemin kendi alt kategorisi olsun.
+- amount: Tüm kalemlerin toplamı
+Sadece JSON olarak yanıt ver.`;
 
     let messages: any[] = [];
     if (isImage) {

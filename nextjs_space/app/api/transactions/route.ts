@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, type, amount, description, date, categoryId, accountId, vendorId, notes } = body ?? {};
+    const { id, type, amount, description, date, categoryId, accountId, vendorId, notes, groupLabel, documentNo } = body ?? {};
 
     if (!id) return NextResponse.json({ error: 'ID gerekli' }, { status: 400 });
 
@@ -109,6 +109,8 @@ export async function PUT(request: NextRequest) {
         accountId: accountId ?? oldTx.accountId,
         vendorId: vendorId !== undefined ? (vendorId || null) : oldTx.vendorId,
         notes: notes !== undefined ? (notes || null) : oldTx.notes,
+        groupLabel: groupLabel !== undefined ? (groupLabel || null) : oldTx.groupLabel,
+        documentNo: documentNo !== undefined ? (documentNo || null) : oldTx.documentNo,
       },
       include: { category: true, account: true },
     });

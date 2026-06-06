@@ -7,10 +7,29 @@ import { randomUUID } from 'crypto';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { type, date, accountId, vendorId, vendorName, notes, lines } = body ?? {};
+    const { type, date, accountId, vendorId, vendorName, notes, lines, groupLabel, documentNo } = body ?? {};
 
     if (!type || !date || !accountId || !Array.isArray(lines) || lines.length === 0) {
       return NextResponse.json({ error: 'Zorunlu alanlar eksik' }, { status: 400 });
+    }
+
+    // Satıcı bul veya oluştur
+    let resolvedVendorId = vendorId || null;
+    if (!resolvedVendorId && vendorName && vendorName.trim()) {
+      const trimmedName = vendorName.trim();
+      // Mevcut satıcıyı ara (case-insensitive)
+      const existingVendor = await prisma.vendor.findFirst({
+        where: { name: { equals: trimmedName, mode: 'insensitive' } },
+      });
+      if (existingVendor) {
+        resolvedVendorId = existingVendor.id;
+      } else {
+        // Yeni satıcı oluştur
+        const newVendor = await prisma.vendor.create({
+          data: { name: trimmedName },
+        });
+        resolvedVendorId = newVendor.id;
+      }
     }
 
     const groupId = randomUUID();
@@ -29,11 +48,13 @@ export async function POST(request: NextRequest) {
           date: new Date(date),
           categoryId: line.categoryId || null,
           accountId,
-          vendorId: vendorId || null,
+          vendorId: resolvedVendorId,
           groupId,
+          groupLabel: groupLabel || null,
+          documentNo: documentNo || null,
           notes: notes || null,
         },
-        include: { category: true, account: true },
+        include: { category: true, account: true, vendor: true },
       });
 
       results.push(transaction);
@@ -52,6 +73,71 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error('Batch transaction POST error:', error);
     return NextResponse.json({ error: 'İşlemler eklenemedi' }, { status: 500 });
+  }
+}
+
+// UPDATE group-level fields
+export async function PUT(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { groupId, vendorName, date, accountId, groupLabel, documentNo } = body ?? {};
+
+    if (!groupId) return NextResponse.json({ error: 'groupId gerekli' }, { status: 400 });
+
+    const txs = await prisma.transaction.findMany({ where: { groupId } });
+    if (txs.length === 0) return NextResponse.json({ error: 'Grup bulunamadı' }, { status: 404 });
+
+    // Resolve vendor
+    let resolvedVendorId: string | null = null;
+    if (vendorName && vendorName.trim()) {
+      const trimmedName = vendorName.trim();
+      const existingVendor = await prisma.vendor.findFirst({
+        where: { name: { equals: trimmedName, mode: 'insensitive' } },
+      });
+      if (existingVendor) {
+        resolvedVendorId = existingVendor.id;
+      } else {
+        const newVendor = await prisma.vendor.create({ data: { name: trimmedName } });
+        resolvedVendorId = newVendor.id;
+      }
+    }
+
+    // Build update data
+    const updateData: any = {};
+    if (resolvedVendorId !== null) updateData.vendorId = resolvedVendorId;
+    if (date) updateData.date = new Date(date);
+    if (groupLabel !== undefined) updateData.groupLabel = groupLabel || null;
+    if (documentNo !== undefined) updateData.documentNo = documentNo || null;
+
+    // Handle account change (balance adjustments)
+    if (accountId && accountId !== txs[0].accountId) {
+      const totalAmount = txs.reduce((sum, tx) => {
+        return sum + (tx.type === 'INCOME' ? tx.amount : -tx.amount);
+      }, 0);
+      // Reverse from old account
+      await prisma.account.update({
+        where: { id: txs[0].accountId },
+        data: { balance: { increment: -totalAmount } },
+      });
+      // Apply to new account
+      await prisma.account.update({
+        where: { id: accountId },
+        data: { balance: { increment: totalAmount } },
+      });
+      updateData.accountId = accountId;
+    }
+
+    if (Object.keys(updateData).length > 0) {
+      await prisma.transaction.updateMany({
+        where: { groupId },
+        data: updateData,
+      });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error: any) {
+    console.error('Batch PUT error:', error);
+    return NextResponse.json({ error: 'Grup güncellenemedi' }, { status: 500 });
   }
 }
 
