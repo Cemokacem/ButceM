@@ -144,6 +144,7 @@ model Transaction {
   vendor      Vendor?  @relation(fields: [vendorId], references: [id])
   documentId  String?
   document    Document? @relation(fields: [documentId], references: [id])
+  groupId     String?  // Aynı fişe ait işlemleri gruplar
   notes       String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -152,6 +153,7 @@ model Transaction {
   @@index([type])
   @@index([categoryId])
   @@index([accountId])
+  @@index([groupId])
 }
 
 model DebtCredit {

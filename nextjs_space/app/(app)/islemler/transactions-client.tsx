@@ -9,10 +9,10 @@ import { DeleteConfirm } from '@/components/delete-confirm';
 import { FormField } from '@/components/form-field';
 import { FadeIn } from '@/components/ui/animate';
 import { toast } from 'sonner';
-import { formatCurrency, formatDate, formatDateInput, getTransactionTypeLabel } from '@/lib/format';
+import { formatCurrency, formatDate, formatDateInput } from '@/lib/format';
 import {
-  Plus, Search, ArrowUpRight, ArrowDownRight, Pencil, Trash2,
-  ArrowLeftRight, Minus, CirclePlus
+  Plus, Search, ArrowDownRight, ArrowUpRight, Pencil, Trash2,
+  ChevronDown, ChevronRight, Minus, CirclePlus, Receipt, Store
 } from 'lucide-react';
 
 interface Props {
@@ -34,29 +34,55 @@ interface TxForm {
   time: string;
   accountId: string;
   vendorId: string;
+  vendorName: string;
   notes: string;
-  isVerified: boolean;
   lines: LineItem[];
+}
+
+interface GroupedTx {
+  groupId: string;
+  vendorName: string;
+  date: string;
+  type: string;
+  total: number;
+  accountName: string;
+  accountId: string;
+  items: Array<{
+    id: string;
+    description: string;
+    amount: number;
+    categoryName: string | null;
+    categoryColor: string | null;
+    categoryId: string | null;
+  }>;
 }
 
 const emptyLine: LineItem = { categoryId: '', amount: '', description: '' };
 const emptyForm: TxForm = {
-  type: 'EXPENSE', date: '', time: '', accountId: '', vendorId: '',
-  notes: '', isVerified: false, lines: [{ ...emptyLine }],
+  type: 'EXPENSE', date: '', time: '', accountId: '', vendorId: '', vendorName: '',
+  notes: '', lines: [{ ...emptyLine }],
 };
 
 export function TransactionsClient({ categories, accounts, vendors }: Props) {
-  const [transactions, setTransactions] = useState<any[]>([]);
+  const [groups, setGroups] = useState<GroupedTx[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [deleteId, setDeleteId] = useState('');
+  const [deleteGroupId, setDeleteGroupId] = useState('');
+  const [deleteSingleId, setDeleteSingleId] = useState('');
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<TxForm>({ ...emptyForm });
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [currentDate, setCurrentDate] = useState('');
   const [currentTime, setCurrentTime] = useState('');
+  // New account dialog
+  const [newAccOpen, setNewAccOpen] = useState(false);
+  const [newAccName, setNewAccName] = useState('');
+  const [newAccType, setNewAccType] = useState('CASH');
+  const [savingAcc, setSavingAcc] = useState(false);
+  const [localAccounts, setLocalAccounts] = useState(accounts);
 
   useEffect(() => {
     const now = new Date();
@@ -69,9 +95,41 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
       setLoading(true);
       const params = new URLSearchParams();
       if (filterType) params.set('type', filterType);
+      params.set('limit', '500');
       const res = await fetch(`/api/transactions?${params.toString()}`);
       const data = await res.json();
-      setTransactions(data?.transactions ?? []);
+      const txs: any[] = data?.transactions ?? [];
+
+      // Group transactions by groupId or individual
+      const groupMap = new Map<string, GroupedTx>();
+
+      for (const tx of txs) {
+        const key = tx.groupId || `single_${tx.id}`;
+        if (!groupMap.has(key)) {
+          groupMap.set(key, {
+            groupId: key,
+            vendorName: tx.vendor?.name || tx.description || 'İşlem',
+            date: tx.date,
+            type: tx.type,
+            total: 0,
+            accountName: tx.account?.name || '',
+            accountId: tx.accountId || '',
+            items: [],
+          });
+        }
+        const group = groupMap.get(key)!;
+        group.total += tx.amount ?? 0;
+        group.items.push({
+          id: tx.id,
+          description: tx.description ?? '',
+          amount: tx.amount ?? 0,
+          categoryName: tx.category?.name ?? null,
+          categoryColor: tx.category?.color ?? null,
+          categoryId: tx.categoryId ?? null,
+        });
+      }
+
+      setGroups(Array.from(groupMap.values()));
     } catch {
       toast.error('İşlemler yüklenemedi');
     } finally {
@@ -81,14 +139,13 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
 
   useEffect(() => { loadTransactions(); }, [loadTransactions]);
 
-  // Check for ?new=true or multi-line params from OCR
+  // Check for ?new=true from OCR
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       if (params.get('new') === 'true') {
         const linesParam = params.get('lines');
         let lines: LineItem[] = [{ ...emptyLine }];
-
         if (linesParam) {
           try {
             const parsed = JSON.parse(decodeURIComponent(linesParam));
@@ -100,21 +157,13 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
               }));
             }
           } catch { /* ignore */ }
-        } else {
-          // Legacy single-item params
-          const desc = params.get('description') ?? '';
-          const amt = params.get('amount') ?? '';
-          if (desc || amt) {
-            lines = [{ categoryId: '', amount: amt, description: desc }];
-          }
         }
-
         setForm({
           ...emptyForm,
           date: params.get('date') || currentDate || new Date().toISOString().split('T')[0],
           time: currentTime || new Date().toTimeString().slice(0, 5),
           accountId: params.get('accountId') ?? '',
-          vendorId: params.get('vendorId') ?? '',
+          vendorName: params.get('vendorName') ?? '',
           lines,
         });
         setDialogOpen(true);
@@ -123,16 +172,21 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
     }
   }, [currentDate, currentTime]);
 
-  // Line item helpers
-  const addLine = () => {
-    setForm(f => ({ ...f, lines: [...f.lines, { ...emptyLine }] }));
+  const toggleGroup = (groupId: string) => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
   };
 
+  // Line item helpers
+  const addLine = () => setForm(f => ({ ...f, lines: [...f.lines, { ...emptyLine }] }));
   const removeLine = (idx: number) => {
     if (form.lines.length <= 1) return;
     setForm(f => ({ ...f, lines: f.lines.filter((_, i) => i !== idx) }));
   };
-
   const updateLine = (idx: number, field: keyof LineItem, value: string) => {
     setForm(f => ({
       ...f,
@@ -150,7 +204,7 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
     setSaving(true);
     try {
       if (form.id) {
-        // Edit mode - single transaction update
+        // Edit single transaction
         const line = validLines[0];
         const res = await fetch('/api/transactions', {
           method: 'PUT',
@@ -170,7 +224,7 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
         if (!res.ok) { const err = await res.json(); throw new Error(err?.error); }
         toast.success('İşlem güncellendi');
       } else {
-        // Create mode - batch create multiple transactions
+        // Batch create
         const res = await fetch('/api/transactions/batch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -179,6 +233,7 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
             date: form.date || currentDate,
             accountId: form.accountId,
             vendorId: form.vendorId,
+            vendorName: form.vendorName,
             notes: form.notes,
             lines: validLines.map(l => ({
               categoryId: l.categoryId || null,
@@ -188,7 +243,7 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
           }),
         });
         if (!res.ok) { const err = await res.json(); throw new Error(err?.error); }
-        toast.success(`${validLines.length} işlem eklendi`);
+        toast.success(`${validLines.length} kalem eklendi`);
       }
       setDialogOpen(false);
       setForm({ ...emptyForm });
@@ -200,10 +255,16 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
     }
   };
 
-  const handleDelete = async () => {
+  const handleDeleteGroup = async () => {
     try {
-      const res = await fetch(`/api/transactions?id=${deleteId}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error();
+      if (deleteGroupId.startsWith('single_')) {
+        const txId = deleteGroupId.replace('single_', '');
+        const res = await fetch(`/api/transactions?id=${txId}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error();
+      } else {
+        const res = await fetch(`/api/transactions/batch?groupId=${deleteGroupId}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error();
+      }
       toast.success('İşlem silindi');
       setDeleteOpen(false);
       loadTransactions();
@@ -212,27 +273,64 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
     }
   };
 
-  const openEdit = (tx: any) => {
+  const handleDeleteSingle = async () => {
+    try {
+      const res = await fetch(`/api/transactions?id=${deleteSingleId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error();
+      toast.success('Kalem silindi');
+      setDeleteOpen(false);
+      loadTransactions();
+    } catch {
+      toast.error('Silinemedi');
+    }
+  };
+
+  const openEdit = (item: GroupedTx['items'][0], group: GroupedTx) => {
     setForm({
-      id: tx?.id ?? '',
-      type: tx?.type ?? 'EXPENSE',
-      date: formatDateInput(tx?.date),
-      time: tx?.date ? new Date(tx.date).toTimeString().slice(0, 5) : '',
-      accountId: tx?.accountId ?? '',
-      vendorId: tx?.vendorId ?? '',
-      notes: tx?.notes ?? '',
-      isVerified: false,
+      id: item.id,
+      type: group.type,
+      date: formatDateInput(group.date),
+      time: group.date ? new Date(group.date).toTimeString().slice(0, 5) : '',
+      accountId: group.accountId,
+      vendorId: '',
+      vendorName: group.vendorName,
+      notes: '',
       lines: [{
-        categoryId: tx?.categoryId ?? '',
-        amount: String(tx?.amount ?? ''),
-        description: tx?.description ?? '',
+        categoryId: item.categoryId ?? '',
+        amount: String(item.amount ?? ''),
+        description: item.description ?? '',
       }],
     });
     setDialogOpen(true);
   };
 
-  const filtered = (transactions ?? []).filter((t: any) =>
-    (t?.description ?? '').toLowerCase().includes((search ?? '').toLowerCase())
+  // New account handler
+  const handleCreateAccount = async () => {
+    if (!newAccName.trim()) { toast.error('Hesap adı gerekli'); return; }
+    setSavingAcc(true);
+    try {
+      const res = await fetch('/api/accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newAccName.trim(), type: newAccType }),
+      });
+      if (!res.ok) throw new Error();
+      const acc = await res.json();
+      setLocalAccounts(prev => [...prev, { id: acc.id, name: acc.name, type: acc.type }]);
+      setForm(f => ({ ...f, accountId: acc.id }));
+      setNewAccOpen(false);
+      setNewAccName('');
+      toast.success('Hesap oluşturuldu');
+    } catch {
+      toast.error('Hesap oluşturulamadı');
+    } finally {
+      setSavingAcc(false);
+    }
+  };
+
+  const filtered = groups.filter(g =>
+    (g.vendorName ?? '').toLowerCase().includes((search ?? '').toLowerCase()) ||
+    g.items.some(item => (item.description ?? '').toLowerCase().includes((search ?? '').toLowerCase()))
   );
 
   const filteredCategories = (categories ?? []).filter((c: any) => !form.type || c?.type === form.type);
@@ -243,7 +341,7 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <h1 className="text-2xl font-display font-bold tracking-tight">İşlemler</h1>
-            <p className="text-sm text-muted-foreground">Gelir ve gider kayıtlarınızı yönetin</p>
+            <p className="text-sm text-muted-foreground">Fiş ve belgelerinizi gruplu olarak görüntüleyin</p>
           </div>
           <Button onClick={() => { setForm({ ...emptyForm, date: currentDate, time: currentTime, lines: [{ ...emptyLine }] }); setDialogOpen(true); }} className="bg-emerald-500 hover:bg-emerald-600 text-white">
             <Plus size={16} className="mr-1" /> Yeni İşlem
@@ -255,7 +353,7 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
       <div className="flex flex-col sm:flex-row gap-2">
         <div className="relative flex-1">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input placeholder="Ara..." value={search} onChange={(e: any) => setSearch(e?.target?.value ?? '')} className="pl-9" />
+          <Input placeholder="Satıcı veya açıklama ara..." value={search} onChange={(e: any) => setSearch(e?.target?.value ?? '')} className="pl-9" />
         </div>
         <div className="flex gap-2">
           {['', 'INCOME', 'EXPENSE'].map((t: string) => (
@@ -268,53 +366,90 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
         </div>
       </div>
 
-      {/* List */}
+      {/* Grouped Transaction List */}
       <Card>
         <CardContent className="p-0">
           {loading ? (
             <div className="p-8 text-center text-muted-foreground">Yükleniyor...</div>
-          ) : (filtered ?? []).length === 0 ? (
+          ) : filtered.length === 0 ? (
             <div className="p-8 text-center text-muted-foreground">
-              <ArrowLeftRight size={32} className="mx-auto mb-2 opacity-40" />
+              <Receipt size={32} className="mx-auto mb-2 opacity-40" />
               <p>İşlem bulunamadı</p>
             </div>
           ) : (
             <div className="divide-y divide-border">
-              {(filtered ?? []).map((t: any) => (
-                <div key={t?.id} className="flex items-center justify-between p-3 hover:bg-accent/30 transition-colors">
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <div className={`p-1.5 rounded-md flex-shrink-0 ${
-                      t?.type === 'INCOME' ? 'bg-emerald-500/10' : 'bg-red-500/10'
-                    }`}>
-                      {t?.type === 'INCOME' ? <ArrowUpRight size={16} className="text-emerald-500" /> : <ArrowDownRight size={16} className="text-red-500" />}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        {t?.category && (
-                          <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: t.category.color }} />
-                        )}
-                        <p className="text-sm font-medium truncate">{t?.category?.name ?? t?.description}</p>
+              {filtered.map((group) => {
+                const isExpanded = expandedGroups.has(group.groupId);
+                return (
+                  <div key={group.groupId}>
+                    {/* Group Header - Satıcı, Tarih, Toplam */}
+                    <div
+                      className="flex items-center justify-between p-3 hover:bg-accent/30 transition-colors cursor-pointer"
+                      onClick={() => toggleGroup(group.groupId)}
+                    >
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <div className={`p-2 rounded-lg flex-shrink-0 ${
+                          group.type === 'INCOME' ? 'bg-emerald-500/10' : 'bg-red-500/10'
+                        }`}>
+                          {group.type === 'INCOME' ? <ArrowUpRight size={18} className="text-emerald-500" /> : <ArrowDownRight size={18} className="text-red-500" />}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-semibold truncate">{group.vendorName}</p>
+                            <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                              {group.items.length} kalem
+                            </span>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {group.accountName} • {formatDate(group.date)}
+                          </p>
+                        </div>
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        {t?.account?.name} • {formatDate(t?.date)}
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-sm font-mono font-bold whitespace-nowrap ${
+                          group.type === 'INCOME' ? 'text-emerald-500' : 'text-red-500'
+                        }`}>
+                          {group.type === 'INCOME' ? '+' : '-'}{formatCurrency(group.total)}
+                        </span>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={(e: any) => { e.stopPropagation(); setDeleteGroupId(group.groupId); setDeleteSingleId(''); setDeleteOpen(true); }}>
+                          <Trash2 size={14} />
+                        </Button>
+                        {isExpanded ? <ChevronDown size={16} className="text-muted-foreground" /> : <ChevronRight size={16} className="text-muted-foreground" />}
+                      </div>
                     </div>
+
+                    {/* Expanded Detail - Category items */}
+                    {isExpanded && (
+                      <div className="bg-muted/20 border-t border-border">
+                        {group.items.map((item) => (
+                          <div key={item.id} className="flex items-center justify-between px-6 py-2 pl-14 hover:bg-accent/20 transition-colors">
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: item.categoryColor ?? '#9CA3AF' }} />
+                              <span className="text-xs font-medium truncate">{item.categoryName ?? item.description}</span>
+                              {item.description && item.categoryName && item.description !== item.categoryName && (
+                                <span className="text-xs text-muted-foreground truncate">({item.description})</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className={`text-xs font-mono font-semibold ${
+                                group.type === 'INCOME' ? 'text-emerald-600' : 'text-red-600'
+                              }`}>
+                                {formatCurrency(item.amount)}
+                              </span>
+                              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEdit(item, group)}>
+                                <Pencil size={12} />
+                              </Button>
+                              <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => { setDeleteSingleId(item.id); setDeleteGroupId(''); setDeleteOpen(true); }}>
+                                <Trash2 size={12} />
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className={`text-sm font-mono font-semibold whitespace-nowrap ${
-                      t?.type === 'INCOME' ? 'text-emerald-500' : 'text-red-500'
-                    }`}>
-                      {t?.type === 'INCOME' ? '' : '-'}{formatCurrency(t?.amount)}
-                    </span>
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(t)}>
-                      <Pencil size={14} />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => { setDeleteId(t?.id ?? ''); setDeleteOpen(true); }}>
-                      <Trash2 size={14} />
-                    </Button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </CardContent>
@@ -341,11 +476,18 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
             ))}
           </div>
 
+          {/* Vendor name */}
+          {!form.id && (
+            <FormField label="Satıcı / Fiş Adı">
+              <Input value={form.vendorName} onChange={(e: any) => setForm({ ...form, vendorName: e?.target?.value ?? '' })} placeholder="ör: BİM, A101, Migros" />
+            </FormField>
+          )}
+
           {/* Line items */}
           <div className="space-y-3">
+            <p className="text-sm font-medium text-muted-foreground">Kalemler</p>
             {form.lines.map((line, idx) => (
               <div key={idx} className="flex items-start gap-2 p-3 rounded-lg border bg-muted/30">
-                {/* Category icon circle */}
                 <div className="mt-1 w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${filteredCategories.find(c => c.id === line.categoryId)?.color ?? '#9CA3AF'}20` }}>
                   <span className="text-xs font-bold" style={{ color: filteredCategories.find(c => c.id === line.categoryId)?.color ?? '#9CA3AF' }}>
                     {(filteredCategories.find(c => c.id === line.categoryId)?.name ?? '?').charAt(0)}
@@ -366,7 +508,7 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
                       </select>
                     </div>
                     <div>
-                      <label className="text-xs text-muted-foreground">Değer</label>
+                      <label className="text-xs text-muted-foreground">Tutar</label>
                       <div className="flex items-center gap-1">
                         <input type="number" className="w-full h-9 rounded-md border border-input bg-background px-2 text-sm font-mono" value={line.amount} onChange={(e: any) => updateLine(idx, 'amount', e?.target?.value ?? '')} placeholder="0" />
                         <span className="text-sm text-muted-foreground">₺</span>
@@ -375,10 +517,9 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
                   </div>
                   <div>
                     <label className="text-xs text-muted-foreground">Açıklama</label>
-                    <input className="w-full h-9 rounded-md border border-input bg-background px-2 text-sm" value={line.description} onChange={(e: any) => updateLine(idx, 'description', e?.target?.value ?? '')} placeholder="Açıklama (isteğe bağlı)" />
+                    <input className="w-full h-9 rounded-md border border-input bg-background px-2 text-sm" value={line.description} onChange={(e: any) => updateLine(idx, 'description', e?.target?.value ?? '')} placeholder="İsteğe bağlı" />
                   </div>
                 </div>
-                {/* Remove line button */}
                 <button onClick={() => removeLine(idx)} className="mt-1 p-1.5 rounded-full text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 flex-shrink-0" disabled={form.lines.length <= 1}>
                   <Minus size={16} />
                 </button>
@@ -389,25 +530,26 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
           {/* Total & Add line */}
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium">Toplam: <span className="font-mono font-bold">{formatCurrency(totalAmount)}</span></p>
-            <button onClick={addLine} className="flex items-center gap-1 text-emerald-600 hover:text-emerald-700 text-sm font-medium">
-              <CirclePlus size={20} /> Kalem Ekle
-            </button>
+            {!form.id && (
+              <button onClick={addLine} className="flex items-center gap-1 text-emerald-600 hover:text-emerald-700 text-sm font-medium">
+                <CirclePlus size={20} /> Kalem Ekle
+              </button>
+            )}
           </div>
 
           {/* Common fields */}
           <div className="border-t pt-4 space-y-3">
             <FormField label="Hesap" required>
-              <select className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" value={form.accountId} onChange={(e: any) => setForm({ ...form, accountId: e?.target?.value ?? '' })}>
-                <option value="">Seçiniz</option>
-                {(accounts ?? []).map((a: any) => <option key={a?.id} value={a?.id}>{a?.name}</option>)}
-              </select>
-            </FormField>
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2">
-                <input type="checkbox" id="isVerified" checked={form.isVerified} onChange={(e: any) => setForm({ ...form, isVerified: e?.target?.checked })} className="rounded" />
-                <label htmlFor="isVerified" className="text-sm">Kontrol</label>
+              <div className="flex gap-2">
+                <select className="flex-1 h-10 rounded-md border border-input bg-background px-3 text-sm" value={form.accountId} onChange={(e: any) => setForm({ ...form, accountId: e?.target?.value ?? '' })}>
+                  <option value="">Seçiniz</option>
+                  {(localAccounts ?? []).map((a: any) => <option key={a?.id} value={a?.id}>{a?.name}</option>)}
+                </select>
+                <Button type="button" variant="outline" size="sm" className="h-10 px-3 text-emerald-600 border-emerald-300 hover:bg-emerald-50" onClick={() => setNewAccOpen(true)}>
+                  <Plus size={14} />
+                </Button>
               </div>
-            </div>
+            </FormField>
             <div className="grid grid-cols-2 gap-3">
               <FormField label="Tarih" required type="date" value={form.date || currentDate} onChange={(e: any) => setForm({ ...form, date: e?.target?.value ?? '' })} />
               <FormField label="Saat" type="time" value={form.time || currentTime} onChange={(e: any) => setForm({ ...form, time: e?.target?.value ?? '' })} />
@@ -418,14 +560,42 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
                 {(vendors ?? []).map((v: any) => <option key={v?.id} value={v?.id}>{v?.name}</option>)}
               </select>
             </FormField>
-            <FormField label="Notlar (İsteğe bağlı)">
+            <FormField label="Notlar">
               <textarea className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[60px]" value={form.notes} onChange={(e: any) => setForm({ ...form, notes: e?.target?.value ?? '' })} placeholder="Notlar" />
             </FormField>
           </div>
         </div>
       </CrudDialog>
 
-      <DeleteConfirm open={deleteOpen} onClose={() => setDeleteOpen(false)} onConfirm={handleDelete} />
+      {/* New Account Dialog */}
+      <CrudDialog
+        open={newAccOpen}
+        onClose={() => setNewAccOpen(false)}
+        title="Yeni Hesap Oluştur"
+        onSave={handleCreateAccount}
+        saving={savingAcc}
+        saveLabel="Oluştur"
+      >
+        <div className="space-y-3">
+          <FormField label="Hesap Adı" required value={newAccName} onChange={(e: any) => setNewAccName(e?.target?.value ?? '')} placeholder="ör: Nakit, Garanti" />
+          <FormField label="Hesap Türü" required>
+            <select className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" value={newAccType} onChange={(e: any) => setNewAccType(e?.target?.value ?? 'CASH')}>
+              <option value="CASH">Nakit</option>
+              <option value="BANK">Banka</option>
+              <option value="CREDIT_CARD">Kredi Kartı</option>
+              <option value="OTHER">Diğer</option>
+            </select>
+          </FormField>
+        </div>
+      </CrudDialog>
+
+      <DeleteConfirm
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        onConfirm={deleteSingleId ? handleDeleteSingle : handleDeleteGroup}
+        title={deleteSingleId ? 'Bu kalemi silmek istediğinize emin misiniz?' : 'Tüm fişi silmek istediğinize emin misiniz?'}
+        description={deleteSingleId ? 'Sadece bu kalem silinecek.' : 'Fişe ait tüm kalemler silinecek.'}
+      />
     </div>
   );
 }

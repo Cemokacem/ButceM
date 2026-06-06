@@ -3,192 +3,390 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Progress } from '@/components/ui/progress';
 import { FadeIn, SlideIn } from '@/components/ui/animate';
 import {
-  Wallet, TrendingUp, TrendingDown, HandCoins, CreditCard,
-  ArrowUpRight, ArrowDownRight, ArrowLeftRight, Plus
+  Wallet, TrendingUp, TrendingDown, CreditCard, Plus,
+  ArrowUpRight, ArrowDownRight, MoreVertical, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/lib/format';
 import dynamic from 'next/dynamic';
 
-const DashboardCharts = dynamic(() => import('./dashboard-charts'), { ssr: false, loading: () => <div className="h-64 bg-muted/30 rounded-lg animate-pulse" /> });
+const DashboardCharts = dynamic(() => import('./dashboard-charts'), { ssr: false, loading: () => <div className="h-48 bg-muted/30 rounded-lg animate-pulse" /> });
 
 interface DashboardProps {
   totalBalance: number;
+  totalCreditCardUsed: number;
+  netBalance: number;
   monthlyIncome: number;
   monthlyExpense: number;
-  totalDebt: number;
-  totalCredit: number;
-  totalInstallmentRemaining: number;
-  categoryBreakdown: Array<{ name: string; total: number; color: string }>;
-  monthlyTrend: Array<{ month: string; income: number; expense: number }>;
+  prevMonthIncome: number;
+  prevMonthExpense: number;
+  accounts: Array<{ id: string; name: string; type: string; balance: number; currency: string; color: string; bankName: string | null }>;
+  creditCards: Array<{ id: string; name: string; limitAmount: number; usedAmount: number; color: string; cardNetwork: string }>;
   recentTransactions: Array<{
     id: string; type: string; amount: number; description: string;
-    date: string; notes: string | null; categoryName: string | null;
-    categoryColor: string | null; accountName: string;
+    date: string; categoryName: string | null; categoryColor: string | null;
+    accountName: string; vendorName: string | null; categoryIcon: string | null;
   }>;
-  accountCount: number;
+  categoryBreakdown: Array<{ name: string; total: number; color: string }>;
+  last7Days: Array<{ day: string; shortDay: string; income: number; expense: number }>;
+  balanceTrend: Array<{ date: string; balance: number }>;
+  budgets: Array<{ id: string; name: string; amount: number; spent: number; color: string; categoryName: string; startDate: string; endDate: string }>;
+  cashFlow: {
+    monthName: string;
+    totalIncome: number;
+    totalExpense: number;
+    txCountIncome: number;
+    txCountExpense: number;
+    daysInMonth: number;
+    avgDailyIncome: number;
+    avgDailyExpense: number;
+    avgTxIncome: number;
+    avgTxExpense: number;
+  };
 }
 
-function AnimatedNumber({ value, prefix = '' }: { value: number; prefix?: string }) {
-  const [display, setDisplay] = useState(0);
-  useEffect(() => {
-    const duration = 1000;
-    const steps = 30;
-    const increment = value / steps;
-    let current = 0;
-    let step = 0;
-    const timer = setInterval(() => {
-      step++;
-      current += increment;
-      if (step >= steps) {
-        setDisplay(value);
-        clearInterval(timer);
-      } else {
-        setDisplay(current);
-      }
-    }, duration / steps);
-    return () => clearInterval(timer);
-  }, [value]);
-  return <span>{prefix}{formatCurrency(display)}</span>;
+function getCurrencySymbol(currency: string) {
+  const map: Record<string, string> = { TRY: '₺', USD: '$', EUR: '€', GBP: '£' };
+  return map[currency] || currency;
 }
 
 export function DashboardClient(props: DashboardProps) {
   const {
-    totalBalance, monthlyIncome, monthlyExpense, totalDebt,
-    totalCredit, totalInstallmentRemaining, categoryBreakdown,
-    monthlyTrend, recentTransactions, accountCount
+    totalBalance, totalCreditCardUsed, netBalance,
+    monthlyIncome, monthlyExpense, prevMonthIncome, prevMonthExpense,
+    accounts, creditCards, recentTransactions, categoryBreakdown,
+    last7Days, balanceTrend, budgets, cashFlow
   } = props;
 
-  const summaryCards = [
-    { title: 'Toplam Bakiye', value: totalBalance, icon: Wallet, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
-    { title: 'Aylık Gelir', value: monthlyIncome, icon: TrendingUp, color: 'text-blue-500', bg: 'bg-blue-500/10' },
-    { title: 'Aylık Gider', value: monthlyExpense, icon: TrendingDown, color: 'text-red-500', bg: 'bg-red-500/10' },
-    { title: 'Toplam Borç', value: totalDebt, icon: HandCoins, color: 'text-orange-500', bg: 'bg-orange-500/10' },
-    { title: 'Toplam Alacak', value: totalCredit, icon: HandCoins, color: 'text-purple-500', bg: 'bg-purple-500/10' },
-    { title: 'Kalan Taksit', value: totalInstallmentRemaining, icon: CreditCard, color: 'text-pink-500', bg: 'bg-pink-500/10' },
-  ];
-
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Header */}
       <FadeIn>
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl md:text-3xl font-display font-bold tracking-tight">Dashboard</h1>
-            <p className="text-muted-foreground text-sm mt-1">Finansal durumunuzun özeti</p>
-          </div>
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-display font-bold tracking-tight">Dashboard</h1>
           <Link href="/islemler?new=true">
-            <Button className="bg-emerald-500 hover:bg-emerald-600 text-white">
-              <Plus size={16} className="mr-1" /> Yeni İşlem
+            <Button size="sm" className="bg-emerald-500 hover:bg-emerald-600 text-white">
+              <Plus size={14} className="mr-1" /> Yeni İşlem
             </Button>
           </Link>
         </div>
       </FadeIn>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
-        {summaryCards?.map((card: any, i: number) => {
-          const Icon = card?.icon;
-          return (
-            <SlideIn key={i} from="bottom" delay={i * 0.08}>
-              <Card className="hover:shadow-md transition-shadow">
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-3">
-                    <div className={`p-2 rounded-lg ${card?.bg}`}>
-                      {Icon && <Icon size={20} className={card?.color} />}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs text-muted-foreground truncate">{card?.title}</p>
-                      <p className={`text-sm md:text-base font-bold font-mono ${card?.color}`}>
-                        <AnimatedNumber value={card?.value ?? 0} />
-                      </p>
-                    </div>
+      {/* Top Row: Özet | Bu Ay | Geçen Ay */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <SlideIn from="bottom" delay={0}>
+          <Card className="border-l-4 border-l-emerald-500">
+            <CardContent className="p-4">
+              <p className="text-xs text-muted-foreground font-medium mb-1">Özet</p>
+              <div className="space-y-1">
+                <div className="flex justify-between text-sm">
+                  <span>Bakiye</span>
+                  <span className="font-mono font-bold text-emerald-600">{formatCurrency(totalBalance)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>Kredi kartları:</span>
+                  <span className="font-mono font-semibold text-red-500">-{formatCurrency(totalCreditCardUsed)}</span>
+                </div>
+                <div className="border-t pt-1 flex justify-between text-sm font-bold">
+                  <span>Net</span>
+                  <span className={`font-mono ${netBalance >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>{formatCurrency(netBalance)}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </SlideIn>
+
+        <SlideIn from="bottom" delay={0.05}>
+          <Card>
+            <CardContent className="p-4">
+              <p className="text-xs text-muted-foreground font-medium mb-1">Bu Ay</p>
+              <div className="space-y-1">
+                <div className="flex justify-between text-sm">
+                  <span className="flex items-center gap-1"><TrendingUp size={12} className="text-emerald-500" /> Gelir</span>
+                  <span className="font-mono font-semibold text-emerald-600">{formatCurrency(monthlyIncome)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="flex items-center gap-1"><TrendingDown size={12} className="text-red-500" /> Gider</span>
+                  <span className="font-mono font-semibold text-red-500">-{formatCurrency(monthlyExpense)}</span>
+                </div>
+                <div className="border-t pt-1 flex justify-between text-sm font-bold">
+                  <span>Net</span>
+                  <span className={`font-mono ${monthlyIncome - monthlyExpense >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                    {formatCurrency(monthlyIncome - monthlyExpense)}
+                  </span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </SlideIn>
+
+        <SlideIn from="bottom" delay={0.1}>
+          <Card>
+            <CardContent className="p-4">
+              <p className="text-xs text-muted-foreground font-medium mb-1">Geçen Ay</p>
+              <div className="space-y-1">
+                <div className="flex justify-between text-sm">
+                  <span className="flex items-center gap-1"><TrendingUp size={12} className="text-emerald-500" /> Gelir</span>
+                  <span className="font-mono font-semibold text-emerald-600">{formatCurrency(prevMonthIncome)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="flex items-center gap-1"><TrendingDown size={12} className="text-red-500" /> Gider</span>
+                  <span className="font-mono font-semibold text-red-500">-{formatCurrency(prevMonthExpense)}</span>
+                </div>
+                <div className="border-t pt-1 flex justify-between text-sm font-bold">
+                  <span>Net</span>
+                  <span className={`font-mono ${prevMonthIncome - prevMonthExpense >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                    {formatCurrency(prevMonthIncome - prevMonthExpense)}
+                  </span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </SlideIn>
+      </div>
+
+      {/* Second Row: Hesaplar + Kredi Kartları | Bakiye Grafiği */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <div className="space-y-3">
+          {/* Hesaplar */}
+          <FadeIn delay={0.1}>
+            <Card>
+              <CardHeader className="pb-2 flex flex-row items-center justify-between">
+                <CardTitle className="text-sm font-semibold">Hesaplar</CardTitle>
+                <Link href="/hesaplar"><Button variant="ghost" size="sm" className="h-6 text-xs">Tümü</Button></Link>
+              </CardHeader>
+              <CardContent className="pt-0">
+                {accounts.length === 0 ? (
+                  <p className="text-xs text-muted-foreground py-2">Hesap bulunamadı</p>
+                ) : (
+                  <div className="space-y-2">
+                    {accounts.map(acc => (
+                      <div key={acc.id} className="flex items-center justify-between py-1">
+                        <div className="flex items-center gap-2">
+                          <Wallet size={14} className="text-muted-foreground" />
+                          <div>
+                            <p className="text-sm font-medium">{acc.name}</p>
+                            {acc.bankName && <p className="text-xs text-muted-foreground">{acc.bankName}</p>}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className={`text-sm font-mono font-bold ${acc.balance >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                            {formatCurrency(acc.balance)}
+                          </p>
+                          <p className="text-xs text-muted-foreground">{acc.currency} - {getCurrencySymbol(acc.currency)}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </FadeIn>
+
+          {/* Kredi Kartları */}
+          {creditCards.length > 0 && (
+            <FadeIn delay={0.15}>
+              <Card>
+                <CardHeader className="pb-2 flex flex-row items-center justify-between">
+                  <CardTitle className="text-sm font-semibold">Kredi Kartları</CardTitle>
+                  <Link href="/kredi-kartlari"><Button variant="ghost" size="sm" className="h-6 text-xs">Tümü</Button></Link>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <div className="space-y-3">
+                    {creditCards.map(card => {
+                      const usedPercent = card.limitAmount > 0 ? Math.round((card.usedAmount / card.limitAmount) * 100) : 0;
+                      return (
+                        <div key={card.id}>
+                          <div className="flex items-center justify-between mb-1">
+                            <div className="flex items-center gap-2">
+                              <CreditCard size={14} style={{ color: card.color }} />
+                              <p className="text-sm font-medium">{card.name}</p>
+                            </div>
+                            <span className="text-sm font-mono font-semibold text-red-500">-{formatCurrency(card.usedAmount)}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                              <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(usedPercent, 100)}%`, backgroundColor: card.color }} />
+                            </div>
+                            <span className="text-xs text-muted-foreground">%{usedPercent}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </CardContent>
               </Card>
-            </SlideIn>
-          );
-        })}
+            </FadeIn>
+          )}
+        </div>
+
+        {/* Bakiye Grafiği */}
+        <FadeIn delay={0.15}>
+          <Card className="h-full">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold">Bakiye</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <DashboardCharts type="balance" data={balanceTrend} />
+            </CardContent>
+          </Card>
+        </FadeIn>
       </div>
 
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* Third Row: Son 7 Gün | Bütçeler */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <FadeIn delay={0.2}>
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-base">Aylık Gelir/Gider Trendi</CardTitle>
+              <CardTitle className="text-sm font-semibold">Son 7 Gün</CardTitle>
             </CardHeader>
             <CardContent>
-              <DashboardCharts type="trend" data={monthlyTrend} />
+              <DashboardCharts type="week" data={last7Days} />
             </CardContent>
           </Card>
         </FadeIn>
-        <FadeIn delay={0.3}>
+
+        <FadeIn delay={0.25}>
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Kategori Dağılımı</CardTitle>
+            <CardHeader className="pb-2 flex flex-row items-center justify-between">
+              <CardTitle className="text-sm font-semibold">Bütçeler</CardTitle>
+              <Link href="/butceler"><Button variant="ghost" size="sm" className="h-6 text-xs">Tümü</Button></Link>
             </CardHeader>
-            <CardContent>
-              <DashboardCharts type="category" data={categoryBreakdown} />
+            <CardContent className="pt-0">
+              {budgets.length === 0 ? (
+                <p className="text-xs text-muted-foreground py-4 text-center">Bütçe tanımlanmamış</p>
+              ) : (
+                <div className="space-y-3">
+                  {budgets.slice(0, 4).map(b => {
+                    const pct = b.amount > 0 ? Math.round((b.spent / b.amount) * 100) : 0;
+                    const startD = b.startDate ? formatDate(b.startDate) : '';
+                    const endD = b.endDate ? formatDate(b.endDate) : '';
+                    return (
+                      <div key={b.id}>
+                        <div className="flex items-center justify-between mb-0.5">
+                          <p className="text-sm font-medium">{b.categoryName}</p>
+                        </div>
+                        <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+                          <span>{startD}</span>
+                          <span>%{pct}</span>
+                          <span>{endD}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 h-2.5 bg-muted rounded-full overflow-hidden">
+                            <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(pct, 100)}%`, backgroundColor: pct > 90 ? '#EF4444' : b.color }} />
+                          </div>
+                        </div>
+                        <div className="flex justify-between text-xs text-muted-foreground mt-0.5">
+                          <span>{formatCurrency(b.spent)}</span>
+                          <span>{formatCurrency(b.amount)}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </CardContent>
           </Card>
         </FadeIn>
       </div>
 
-      {/* Recent Transactions */}
-      <FadeIn delay={0.4}>
-        <Card>
-          <CardHeader className="pb-2">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base">Son İşlemler</CardTitle>
-              <Link href="/islemler">
-                <Button variant="ghost" size="sm">Tümünü Gör</Button>
-              </Link>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {(recentTransactions ?? []).length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <ArrowLeftRight size={32} className="mx-auto mb-2 opacity-40" />
-                <p className="text-sm">Henüz işlem bulunmuyor</p>
-                <Link href="/islemler?new=true">
-                  <Button variant="outline" size="sm" className="mt-2">Yeni İşlem Ekle</Button>
-                </Link>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {(recentTransactions ?? []).map((t: any) => (
-                  <div key={t?.id} className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-accent/50 transition-colors">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className={`p-1.5 rounded-md ${
-                        t?.type === 'INCOME' ? 'bg-emerald-500/10' : t?.type === 'EXPENSE' ? 'bg-red-500/10' : 'bg-blue-500/10'
+      {/* Fourth Row: Son İşlemler | Nakit Akımı */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <FadeIn delay={0.3}>
+          <Card>
+            <CardHeader className="pb-2 flex flex-row items-center justify-between">
+              <CardTitle className="text-sm font-semibold">İşlemler</CardTitle>
+              <Link href="/islemler"><Button variant="ghost" size="sm" className="h-6 text-xs">Tümü</Button></Link>
+            </CardHeader>
+            <CardContent className="pt-0">
+              {recentTransactions.length === 0 ? (
+                <p className="text-xs text-muted-foreground py-4 text-center">Henüz işlem yok</p>
+              ) : (
+                <div className="space-y-1">
+                  {recentTransactions.map(t => (
+                    <div key={t.id} className="flex items-center justify-between py-1.5 px-1 rounded hover:bg-accent/30 transition-colors">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${t.categoryColor ?? '#9CA3AF'}20` }}>
+                          {t.type === 'INCOME'
+                            ? <ArrowUpRight size={13} className="text-emerald-500" />
+                            : <ArrowDownRight size={13} className="text-red-500" />
+                          }
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium truncate">{t.categoryName ?? t.description}</p>
+                          <p className="text-[10px] text-muted-foreground">{t.accountName} · {formatDate(t.date)}</p>
+                        </div>
+                      </div>
+                      <span className={`text-xs font-mono font-bold whitespace-nowrap ${
+                        t.type === 'INCOME' ? 'text-emerald-500' : 'text-red-500'
                       }`}>
-                        {t?.type === 'INCOME' ? <ArrowUpRight size={16} className="text-emerald-500" /> :
-                         t?.type === 'EXPENSE' ? <ArrowDownRight size={16} className="text-red-500" /> :
-                         <ArrowLeftRight size={16} className="text-blue-500" />}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium truncate">{t?.description}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {t?.accountName} {t?.categoryName ? `· ${t.categoryName}` : ''} · {formatDate(t?.date)}
-                        </p>
-                      </div>
+                        {t.type === 'INCOME' ? '+' : '-'}{formatCurrency(t.amount)}
+                      </span>
                     </div>
-                    <span className={`text-sm font-mono font-semibold whitespace-nowrap ${
-                      t?.type === 'INCOME' ? 'text-emerald-500' : t?.type === 'EXPENSE' ? 'text-red-500' : 'text-blue-500'
-                    }`}>
-                      {t?.type === 'INCOME' ? '+' : t?.type === 'EXPENSE' ? '-' : ''}{formatCurrency(t?.amount ?? 0)}
-                    </span>
-                  </div>
-                ))}
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </FadeIn>
+
+        <FadeIn delay={0.35}>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold">Nakit Akımı (İşlemler)</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <div className="text-center mb-3">
+                <p className="text-sm font-semibold">{cashFlow.monthName}</p>
               </div>
-            )}
-          </CardContent>
-        </Card>
-      </FadeIn>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left py-1 font-medium"></th>
+                    <th className="text-right py-1 font-medium text-emerald-600">Gelirler</th>
+                    <th className="text-right py-1 font-medium text-red-500">Giderler</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b">
+                    <td className="py-1.5">Toplam</td>
+                    <td className="text-right font-mono text-emerald-600">{formatCurrency(cashFlow.totalIncome)}</td>
+                    <td className="text-right font-mono text-red-500">-{formatCurrency(cashFlow.totalExpense)}</td>
+                  </tr>
+                  <tr className="border-b">
+                    <td className="py-1.5">İşlemler</td>
+                    <td className="text-right font-mono">{cashFlow.txCountIncome}</td>
+                    <td className="text-right font-mono">{cashFlow.txCountExpense}</td>
+                  </tr>
+                  <tr className="border-b">
+                    <td className="py-1.5">Ortalama (Gün)</td>
+                    <td className="text-right font-mono text-emerald-600">{formatCurrency(cashFlow.avgDailyIncome)}</td>
+                    <td className="text-right font-mono text-red-500">-{formatCurrency(cashFlow.avgDailyExpense)}</td>
+                  </tr>
+                  <tr className="border-b">
+                    <td className="py-1.5">Ortalama (İşlem)</td>
+                    <td className="text-right font-mono text-emerald-600">{formatCurrency(cashFlow.avgTxIncome)}</td>
+                    <td className="text-right font-mono text-red-500">-{formatCurrency(cashFlow.avgTxExpense)}</td>
+                  </tr>
+                </tbody>
+                <tfoot>
+                  <tr className="font-bold border-t-2">
+                    <td className="py-1.5">Net</td>
+                    <td colSpan={2} className={`text-right font-mono ${
+                      cashFlow.totalIncome - cashFlow.totalExpense >= 0 ? 'text-emerald-600' : 'text-red-500'
+                    }`}>
+                      {formatCurrency(cashFlow.totalIncome - cashFlow.totalExpense)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </CardContent>
+          </Card>
+        </FadeIn>
+      </div>
     </div>
   );
 }

@@ -177,6 +177,7 @@ export default function BelgelerPage() {
     const params = new URLSearchParams();
     params.set('new', 'true');
     if (editResult?.date) params.set('date', editResult.date);
+    if (editResult?.vendorName) params.set('vendorName', editResult.vendorName);
 
     // Build multi-line items
     const lineItems = (editResult?.lineItems ?? []).length > 0
