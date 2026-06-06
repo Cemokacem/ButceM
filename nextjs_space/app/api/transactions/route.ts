@@ -138,7 +138,27 @@ export async function DELETE(request: NextRequest) {
     const tx = await prisma.transaction.findUnique({ where: { id } });
     if (!tx) return NextResponse.json({ error: 'İşlem bulunamadı' }, { status: 404 });
 
-    // Reverse balance
+    // Transfer işlemlerinde tüm grubu sil (kaynak+hedef)
+    if (tx.type === 'TRANSFER' && tx.groupId) {
+      const groupTxs = await prisma.transaction.findMany({ where: { groupId: tx.groupId } });
+      // Bakiyeleri geri al: ilk işlem kaynak (geri ekle), ikinci işlem hedef (geri çıkar)
+      const accountIds = new Set<string>();
+      for (let i = 0; i < groupTxs.length; i++) {
+        const gtx = groupTxs[i];
+        if (accountIds.has(gtx.accountId)) continue; // aynı hesap için tekrar yapma
+        accountIds.add(gtx.accountId);
+        // İlk işlem kaynak ise geri ekle, ikinci hedef ise geri çıkar
+        const change = i === 0 ? gtx.amount : -gtx.amount;
+        await prisma.account.update({
+          where: { id: gtx.accountId },
+          data: { balance: { increment: change } },
+        });
+      }
+      await prisma.transaction.deleteMany({ where: { groupId: tx.groupId } });
+      return NextResponse.json({ success: true });
+    }
+
+    // Normal işlem silme
     const reverseChange = tx.type === 'INCOME' ? -tx.amount : tx.amount;
     await prisma.account.update({
       where: { id: tx.accountId },

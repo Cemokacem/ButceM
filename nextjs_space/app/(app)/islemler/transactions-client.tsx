@@ -12,7 +12,7 @@ import { toast } from 'sonner';
 import { formatCurrency, formatDate, formatDateInput } from '@/lib/format';
 import {
   Plus, Search, ArrowDownRight, ArrowUpRight, Pencil, Trash2,
-  ChevronDown, ChevronRight, Minus, CirclePlus, Receipt, FileText
+  ChevronDown, ChevronRight, Minus, CirclePlus, Receipt, FileText, ArrowRightLeft
 } from 'lucide-react';
 
 interface Props {
@@ -33,6 +33,7 @@ interface TxForm {
   date: string;
   time: string;
   accountId: string;
+  toAccountId: string; // Transfer hedef hesap
   vendorId: string;
   vendorName: string;
   groupLabel: string;
@@ -64,9 +65,25 @@ interface GroupedTx {
 
 const emptyLine: LineItem = { categoryId: '', amount: '', description: '' };
 const emptyForm: TxForm = {
-  type: 'EXPENSE', date: '', time: '', accountId: '', vendorId: '', vendorName: '',
+  type: 'EXPENSE', date: '', time: '', accountId: '', toAccountId: '', vendorId: '', vendorName: '',
   groupLabel: '', documentNo: '', notes: '', lines: [{ ...emptyLine }],
 };
+
+function AccountSelect({ value, onChange, accounts, placeholder }: { value: string; onChange: (v: string) => void; accounts: Array<{ id: string; name: string; type: string }>; placeholder?: string }) {
+  const bankAccs = accounts.filter(a => a.type === 'BANK');
+  const ccAccs = accounts.filter(a => a.type === 'CREDIT_CARD');
+  const cashAccs = accounts.filter(a => a.type === 'CASH');
+  const otherAccs = accounts.filter(a => !['BANK','CREDIT_CARD','CASH'].includes(a.type));
+  return (
+    <select className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" value={value} onChange={(e: any) => onChange(e?.target?.value ?? '')}>
+      <option value="">{placeholder || 'Seçiniz'}</option>
+      {bankAccs.length > 0 && <optgroup label="🏦 Banka Hesapları">{bankAccs.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</optgroup>}
+      {ccAccs.length > 0 && <optgroup label="💳 Kredi Kartları">{ccAccs.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</optgroup>}
+      {cashAccs.length > 0 && <optgroup label="💵 Nakit">{cashAccs.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</optgroup>}
+      {otherAccs.length > 0 && <optgroup label="📁 Diğer">{otherAccs.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</optgroup>}
+    </select>
+  );
+}
 
 export function TransactionsClient({ categories, accounts, vendors }: Props) {
   const [groups, setGroups] = useState<GroupedTx[]>([]);
@@ -129,7 +146,15 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
           });
         }
         const group = groupMap.get(key)!;
-        group.total += tx.amount ?? 0;
+        // Transfer gruplarında: ilk hesabı kaynak, ikincisini hedef olarak göster
+        if (tx.type === 'TRANSFER' && group.items.length === 0) {
+          group.total = tx.amount ?? 0; // Don't double-count transfers
+        } else if (tx.type === 'TRANSFER' && group.items.length >= 1 && tx.accountId !== group.accountId) {
+          // İkinci hesap (hedef) - ismi göster, toplamı arttırma
+          group.vendorName = `${group.accountName} → ${tx.account?.name ?? ''}`;
+        } else if (tx.type !== 'TRANSFER') {
+          group.total += tx.amount ?? 0;
+        }
         group.items.push({
           id: tx.id,
           description: tx.description ?? '',
@@ -176,6 +201,7 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
           accountId: params.get('accountId') ?? '',
           vendorName: params.get('vendorName') ?? '',
           groupLabel: params.get('groupLabel') ?? '',
+          documentNo: params.get('documentNo') ?? '',
           lines,
         });
         setDialogOpen(true);
@@ -212,10 +238,29 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
     const validLines = form.lines.filter(l => l.amount && parseFloat(l.amount) > 0);
     if (validLines.length === 0) { toast.error('En az bir kalem ve tutar gerekli'); return; }
     if (!form.accountId) { toast.error('Hesap seçin'); return; }
+    if (form.type === 'TRANSFER' && !form.toAccountId) { toast.error('Hedef hesap seçin'); return; }
+    if (form.type === 'TRANSFER' && form.accountId === form.toAccountId) { toast.error('Kaynak ve hedef hesap aynı olamaz'); return; }
 
     setSaving(true);
     try {
-      if (form.id) {
+      if (form.type === 'TRANSFER' && !form.id) {
+        // Transfer: API'ye özel istek
+        const totalAmount = validLines.reduce((s, l) => s + parseFloat(l.amount), 0);
+        const res = await fetch('/api/transactions/transfer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fromAccountId: form.accountId,
+            toAccountId: form.toAccountId,
+            amount: totalAmount,
+            description: validLines[0]?.description || 'Transfer',
+            date: form.date || currentDate,
+            notes: form.notes,
+          }),
+        });
+        if (!res.ok) { const err = await res.json(); throw new Error(err?.error); }
+        toast.success('Transfer kaydedildi');
+      } else if (form.id) {
         // Edit single transaction
         const line = validLines[0];
         const res = await fetch('/api/transactions', {
@@ -392,6 +437,7 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
       date: formatDateInput(group.date),
       time: group.date ? new Date(group.date).toTimeString().slice(0, 5) : '',
       accountId: group.accountId,
+      toAccountId: '',
       vendorId: group.vendorId || '',
       vendorName: group.vendorName,
       groupLabel: group.groupLabel || '',
@@ -460,12 +506,12 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input placeholder="Satıcı, belge no veya açıklama ara..." value={search} onChange={(e: any) => setSearch(e?.target?.value ?? '')} className="pl-9" />
         </div>
-        <div className="flex gap-2">
-          {['', 'INCOME', 'EXPENSE'].map((t: string) => (
+        <div className="flex gap-2 flex-wrap">
+          {['', 'INCOME', 'EXPENSE', 'TRANSFER'].map((t: string) => (
             <Button key={t} variant={filterType === t ? 'default' : 'outline'} size="sm" onClick={() => setFilterType(t)}
-              className={filterType === t ? 'bg-emerald-500 hover:bg-emerald-600 text-white' : ''}
+              className={filterType === t ? (t === 'TRANSFER' ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-emerald-500 hover:bg-emerald-600 text-white') : ''}
             >
-              {t === '' ? 'Tümü' : t === 'INCOME' ? 'Gelir' : 'Gider'}
+              {t === '' ? 'Tümü' : t === 'INCOME' ? 'Gelir' : t === 'TRANSFER' ? 'Transfer' : 'Gider'}
             </Button>
           ))}
         </div>
@@ -494,9 +540,9 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
                     >
                       <div className="flex items-center gap-3 min-w-0 flex-1">
                         <div className={`p-2 rounded-lg flex-shrink-0 ${
-                          group.type === 'INCOME' ? 'bg-emerald-500/10' : 'bg-red-500/10'
+                          group.type === 'INCOME' ? 'bg-emerald-500/10' : group.type === 'TRANSFER' ? 'bg-blue-500/10' : 'bg-red-500/10'
                         }`}>
-                          {group.type === 'INCOME' ? <ArrowUpRight size={18} className="text-emerald-500" /> : <ArrowDownRight size={18} className="text-red-500" />}
+                          {group.type === 'INCOME' ? <ArrowUpRight size={18} className="text-emerald-500" /> : group.type === 'TRANSFER' ? <ArrowRightLeft size={18} className="text-blue-500" /> : <ArrowDownRight size={18} className="text-red-500" />}
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
@@ -518,9 +564,9 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
                       </div>
                       <div className="flex items-center gap-1.5">
                         <span className={`text-sm font-mono font-bold whitespace-nowrap ${
-                          group.type === 'INCOME' ? 'text-emerald-500' : 'text-red-500'
+                          group.type === 'INCOME' ? 'text-emerald-500' : group.type === 'TRANSFER' ? 'text-blue-500' : 'text-red-500'
                         }`}>
-                          {group.type === 'INCOME' ? '+' : '-'}{formatCurrency(group.total)}
+                          {group.type === 'INCOME' ? '+' : group.type === 'TRANSFER' ? '' : '-'}{formatCurrency(group.total)}
                         </span>
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e: any) => { e.stopPropagation(); openGroupEdit(group); }}>
                           <Pencil size={13} />
@@ -581,17 +627,17 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
         <div className="space-y-4">
           {/* Type selector */}
           <div className="flex gap-2">
-            {['EXPENSE', 'INCOME'].map((t: string) => (
-              <Button key={t} variant={form.type === t ? 'default' : 'outline'} size="sm" onClick={() => setForm({ ...form, type: t, lines: form.lines.map(l => ({ ...l, categoryId: '' })) })}
-                className={form.type === t ? (t === 'INCOME' ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white') : ''}
+            {['EXPENSE', 'INCOME', 'TRANSFER'].map((t: string) => (
+              <Button key={t} variant={form.type === t ? 'default' : 'outline'} size="sm" onClick={() => setForm({ ...form, type: t, lines: t === 'TRANSFER' ? [{ ...emptyLine }] : form.lines.map(l => ({ ...l, categoryId: '' })), toAccountId: t === 'TRANSFER' ? form.toAccountId : '' })}
+                className={form.type === t ? (t === 'INCOME' ? 'bg-emerald-500 text-white' : t === 'TRANSFER' ? 'bg-blue-500 text-white' : 'bg-red-500 text-white') : ''}
               >
-                {t === 'INCOME' ? 'Gelir' : 'Gider'}
+                {t === 'INCOME' ? 'Gelir' : t === 'TRANSFER' ? 'Transfer' : 'Gider'}
               </Button>
             ))}
           </div>
 
-          {/* Belge bilgileri - sadece yeni işlem */}
-          {!form.id && (
+          {/* Belge bilgileri - sadece yeni işlem, transfer hariç */}
+          {!form.id && form.type !== 'TRANSFER' && (
             <div className="space-y-3 p-3 rounded-lg border bg-muted/20">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Belge Bilgileri</p>
               <div className="grid grid-cols-2 gap-3">
@@ -612,72 +658,105 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
           )}
 
           {/* Line items */}
-          <div className="space-y-3">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Kalemler</p>
-            {form.lines.map((line, idx) => (
-              <div key={idx} className="flex items-start gap-2 p-3 rounded-lg border bg-muted/30">
-                <div className="mt-1 w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${filteredCategories.find(c => c.id === line.categoryId)?.color ?? '#9CA3AF'}20` }}>
-                  <span className="text-xs font-bold" style={{ color: filteredCategories.find(c => c.id === line.categoryId)?.color ?? '#9CA3AF' }}>
-                    {(filteredCategories.find(c => c.id === line.categoryId)?.name ?? '?').charAt(0)}
-                  </span>
+          {form.type === 'TRANSFER' ? (
+            <div className="space-y-3">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Transfer Bilgileri</p>
+              <div className="p-3 rounded-lg border bg-blue-50/50 dark:bg-blue-900/10 space-y-2">
+                <div>
+                  <label className="text-xs text-muted-foreground">Tutar</label>
+                  <div className="flex items-center gap-1">
+                    <input type="number" className="w-full h-9 rounded-md border border-input bg-background px-2 text-sm font-mono" value={form.lines[0]?.amount ?? ''} onChange={(e: any) => updateLine(0, 'amount', e?.target?.value ?? '')} placeholder="0" />
+                    <span className="text-sm text-muted-foreground">₺</span>
+                  </div>
                 </div>
-                <div className="flex-1 space-y-2">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-xs text-muted-foreground">Kategori</label>
-                      <select className="w-full h-9 rounded-md border border-input bg-background px-2 text-sm" value={line.categoryId} onChange={(e: any) => {
-                        const catId = e?.target?.value ?? '';
-                        const catName = filteredCategories.find(c => c.id === catId)?.name ?? '';
-                        updateLine(idx, 'categoryId', catId);
-                        if (!line.description) updateLine(idx, 'description', catName);
-                      }}>
-                        <option value="">Seçin</option>
-                        {filteredCategories.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                      </select>
+                <div>
+                  <label className="text-xs text-muted-foreground">Açıklama</label>
+                  <input className="w-full h-9 rounded-md border border-input bg-background px-2 text-sm" value={form.lines[0]?.description ?? ''} onChange={(e: any) => updateLine(0, 'description', e?.target?.value ?? '')} placeholder="ör: Kredi kartı ödemesi, havale" />
+                </div>
+              </div>
+              <p className="text-sm font-medium">Toplam: <span className="font-mono font-bold">{formatCurrency(totalAmount)}</span></p>
+            </div>
+          ) : (
+            <>
+              <div className="space-y-3">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Kalemler</p>
+                {form.lines.map((line, idx) => (
+                  <div key={idx} className="flex items-start gap-2 p-3 rounded-lg border bg-muted/30">
+                    <div className="mt-1 w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${filteredCategories.find(c => c.id === line.categoryId)?.color ?? '#9CA3AF'}20` }}>
+                      <span className="text-xs font-bold" style={{ color: filteredCategories.find(c => c.id === line.categoryId)?.color ?? '#9CA3AF' }}>
+                        {(filteredCategories.find(c => c.id === line.categoryId)?.name ?? '?').charAt(0)}
+                      </span>
                     </div>
-                    <div>
-                      <label className="text-xs text-muted-foreground">Tutar</label>
-                      <div className="flex items-center gap-1">
-                        <input type="number" className="w-full h-9 rounded-md border border-input bg-background px-2 text-sm font-mono" value={line.amount} onChange={(e: any) => updateLine(idx, 'amount', e?.target?.value ?? '')} placeholder="0" />
-                        <span className="text-sm text-muted-foreground">₺</span>
+                    <div className="flex-1 space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-xs text-muted-foreground">Kategori</label>
+                          <select className="w-full h-9 rounded-md border border-input bg-background px-2 text-sm" value={line.categoryId} onChange={(e: any) => {
+                            const catId = e?.target?.value ?? '';
+                            const catName = filteredCategories.find(c => c.id === catId)?.name ?? '';
+                            updateLine(idx, 'categoryId', catId);
+                            if (!line.description) updateLine(idx, 'description', catName);
+                          }}>
+                            <option value="">Seçin</option>
+                            {filteredCategories.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-xs text-muted-foreground">Tutar</label>
+                          <div className="flex items-center gap-1">
+                            <input type="number" className="w-full h-9 rounded-md border border-input bg-background px-2 text-sm font-mono" value={line.amount} onChange={(e: any) => updateLine(idx, 'amount', e?.target?.value ?? '')} placeholder="0" />
+                            <span className="text-sm text-muted-foreground">₺</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground">Açıklama</label>
+                        <input className="w-full h-9 rounded-md border border-input bg-background px-2 text-sm" value={line.description} onChange={(e: any) => updateLine(idx, 'description', e?.target?.value ?? '')} placeholder="İsteğe bağlı" />
                       </div>
                     </div>
+                    <button onClick={() => removeLine(idx)} className="mt-1 p-1.5 rounded-full text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 flex-shrink-0" disabled={form.lines.length <= 1}>
+                      <Minus size={16} />
+                    </button>
                   </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground">Açıklama</label>
-                    <input className="w-full h-9 rounded-md border border-input bg-background px-2 text-sm" value={line.description} onChange={(e: any) => updateLine(idx, 'description', e?.target?.value ?? '')} placeholder="İsteğe bağlı" />
-                  </div>
-                </div>
-                <button onClick={() => removeLine(idx)} className="mt-1 p-1.5 rounded-full text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 flex-shrink-0" disabled={form.lines.length <= 1}>
-                  <Minus size={16} />
-                </button>
+                ))}
               </div>
-            ))}
-          </div>
 
-          {/* Total & Add line */}
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium">Toplam: <span className="font-mono font-bold">{formatCurrency(totalAmount)}</span></p>
-            {!form.id && (
-              <button onClick={addLine} className="flex items-center gap-1 text-emerald-600 hover:text-emerald-700 text-sm font-medium">
-                <CirclePlus size={20} /> Kalem Ekle
-              </button>
-            )}
-          </div>
+              {/* Total & Add line */}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium">Toplam: <span className="font-mono font-bold">{formatCurrency(totalAmount)}</span></p>
+                {!form.id && (
+                  <button onClick={addLine} className="flex items-center gap-1 text-emerald-600 hover:text-emerald-700 text-sm font-medium">
+                    <CirclePlus size={20} /> Kalem Ekle
+                  </button>
+                )}
+              </div>
+            </>
+          )}
 
           {/* Common fields */}
           <div className="border-t pt-4 space-y-3">
-            <FormField label="Hesap" required>
+            <FormField label={form.type === 'TRANSFER' ? 'Kaynak Hesap' : 'Hesap'} required>
               <div className="flex gap-2">
-                <select className="flex-1 h-10 rounded-md border border-input bg-background px-3 text-sm" value={form.accountId} onChange={(e: any) => setForm({ ...form, accountId: e?.target?.value ?? '' })}>
-                  <option value="">Seçiniz</option>
-                  {(localAccounts ?? []).map((a: any) => <option key={a?.id} value={a?.id}>{a?.name}</option>)}
-                </select>
+                <div className="flex-1">
+                  <AccountSelect value={form.accountId} onChange={(v) => setForm({ ...form, accountId: v })} accounts={localAccounts} placeholder="Seçiniz" />
+                </div>
                 <Button type="button" variant="outline" size="sm" className="h-10 px-3 text-emerald-600 border-emerald-300 hover:bg-emerald-50" onClick={() => setNewAccOpen(true)}>
                   <Plus size={14} />
                 </Button>
               </div>
             </FormField>
+            {form.type === 'TRANSFER' && (
+              <FormField label="Hedef Hesap" required>
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <AccountSelect value={form.toAccountId} onChange={(v) => setForm({ ...form, toAccountId: v })} accounts={localAccounts.filter(a => a.id !== form.accountId)} placeholder="Hedef seçiniz" />
+                  </div>
+                  <Button type="button" variant="outline" size="sm" className="h-10 px-3 text-emerald-600 border-emerald-300 hover:bg-emerald-50" onClick={() => setNewAccOpen(true)}>
+                    <Plus size={14} />
+                  </Button>
+                </div>
+              </FormField>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <FormField label="Tarih" required type="date" value={form.date || currentDate} onChange={(e: any) => setForm({ ...form, date: e?.target?.value ?? '' })} />
               <FormField label="Saat" type="time" value={form.time || currentTime} onChange={(e: any) => setForm({ ...form, time: e?.target?.value ?? '' })} />
@@ -713,10 +792,7 @@ export function TransactionsClient({ categories, accounts, vendors }: Props) {
           </FormField>
           <FormField label="Tarih" type="date" value={groupEditForm.date} onChange={(e: any) => setGroupEditForm({ ...groupEditForm, date: e?.target?.value ?? '' })} />
           <FormField label="Hesap">
-            <select className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" value={groupEditForm.accountId} onChange={(e: any) => setGroupEditForm({ ...groupEditForm, accountId: e?.target?.value ?? '' })}>
-              <option value="">Seçiniz</option>
-              {(localAccounts ?? []).map((a: any) => <option key={a?.id} value={a?.id}>{a?.name}</option>)}
-            </select>
+            <AccountSelect value={groupEditForm.accountId} onChange={(v) => setGroupEditForm({ ...groupEditForm, accountId: v })} accounts={localAccounts} />
           </FormField>
         </div>
       </CrudDialog>

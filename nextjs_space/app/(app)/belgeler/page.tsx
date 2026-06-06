@@ -32,6 +32,12 @@ interface OcrResult {
   lineItems?: OcrLineItem[];
 }
 
+interface AccountOption {
+  id: string;
+  name: string;
+  type: string;
+}
+
 export default function BelgelerPage() {
   const [documents, setDocuments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,7 +47,20 @@ export default function BelgelerPage() {
   const [ocrResult, setOcrResult] = useState<OcrResult | null>(null);
   const [resultOpen, setResultOpen] = useState(false);
   const [editResult, setEditResult] = useState<OcrResult | null>(null);
+  const [selectedAccountId, setSelectedAccountId] = useState('');
+  const [accounts, setAccounts] = useState<AccountOption[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Hesapları yükle
+  const loadAccounts = useCallback(async () => {
+    try {
+      const res = await fetch('/api/accounts');
+      const data = await res.json();
+      setAccounts((data ?? []).filter((a: any) => a?.isActive !== false).map((a: any) => ({ id: a?.id ?? '', name: a?.name ?? '', type: a?.type ?? '' })));
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => { loadAccounts(); }, [loadAccounts]);
 
   const load = useCallback(async () => {
     try {
@@ -181,6 +200,7 @@ export default function BelgelerPage() {
     if (editResult?.vendorName) params.set('vendorName', editResult.vendorName);
     if (editResult?.category) params.set('groupLabel', editResult.category);
     if (editResult?.documentNo) params.set('documentNo', editResult.documentNo);
+    if (selectedAccountId) params.set('accountId', selectedAccountId);
 
     // Build multi-line items
     const lineItems = (editResult?.lineItems ?? []).length > 0
@@ -320,6 +340,25 @@ export default function BelgelerPage() {
               <FormField label="Belge No" value={editResult?.documentNo ?? ''}
                 onChange={(e: any) => setEditResult({ ...editResult, documentNo: e?.target?.value ?? '' })} />
             </div>
+            <FormField label="Hesap / Kredi Kartı">
+              <select className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" value={selectedAccountId} onChange={(e: any) => setSelectedAccountId(e?.target?.value ?? '')}>
+                <option value="">Seçiniz (isteğe bağlı)</option>
+                {(() => {
+                  const bankAccs = accounts.filter(a => a.type === 'BANK');
+                  const ccAccs = accounts.filter(a => a.type === 'CREDIT_CARD');
+                  const cashAccs = accounts.filter(a => a.type === 'CASH');
+                  const otherAccs = accounts.filter(a => !['BANK','CREDIT_CARD','CASH'].includes(a.type));
+                  return (
+                    <>
+                      {bankAccs.length > 0 && <optgroup label="🏦 Banka Hesapları">{bankAccs.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</optgroup>}
+                      {ccAccs.length > 0 && <optgroup label="💳 Kredi Kartları">{ccAccs.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</optgroup>}
+                      {cashAccs.length > 0 && <optgroup label="💵 Nakit">{cashAccs.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</optgroup>}
+                      {otherAccs.length > 0 && <optgroup label="📁 Diğer">{otherAccs.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</optgroup>}
+                    </>
+                  );
+                })()}
+              </select>
+            </FormField>
           </div>
         )}
       </CrudDialog>
