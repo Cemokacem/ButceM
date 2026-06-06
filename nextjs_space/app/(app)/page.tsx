@@ -30,8 +30,15 @@ export default async function DashboardPage() {
     prisma.budget.findMany({ where: { isActive: true }, include: { category: true } }),
   ]);
 
-  const totalBalance = (accounts ?? []).reduce((sum: number, a: any) => sum + (a?.balance ?? 0), 0);
-  const totalCreditCardUsed = (creditCards ?? []).reduce((sum: number, c: any) => sum + (c?.usedAmount ?? 0), 0);
+  // Separate non-credit-card accounts for balance calculation
+  const nonCcAccounts = (accounts ?? []).filter((a: any) => a?.type !== 'CREDIT_CARD');
+  const ccAccounts = (accounts ?? []).filter((a: any) => a?.type === 'CREDIT_CARD');
+  const totalBalance = nonCcAccounts.reduce((sum: number, a: any) => sum + (a?.balance ?? 0), 0);
+  
+  // Credit card used = absolute value of negative CREDIT_CARD account balances
+  // Also fall back to CreditCard model's usedAmount if no matching account found
+  const totalCreditCardUsed = ccAccounts.reduce((sum: number, a: any) => sum + Math.abs(Math.min(0, a?.balance ?? 0)), 0)
+    || (creditCards ?? []).reduce((sum: number, c: any) => sum + (c?.usedAmount ?? 0), 0);
   const netBalance = totalBalance - totalCreditCardUsed;
   
   const monthlyIncome = (monthlyTransactions ?? []).filter((t: any) => t?.type === 'INCOME').reduce((sum: number, t: any) => sum + (t?.amount ?? 0), 0);
@@ -113,17 +120,27 @@ export default async function DashboardPage() {
   const txCountIncome = (monthlyTransactions ?? []).filter((t: any) => t?.type === 'INCOME').length;
   const txCountExpense = (monthlyTransactions ?? []).filter((t: any) => t?.type === 'EXPENSE').length;
 
-  // Serialized data
-  const serializedAccounts = (accounts ?? []).map((a: any) => ({
+  // Serialized data - exclude CREDIT_CARD accounts from Hesaplar section
+  const serializedAccounts = nonCcAccounts.map((a: any) => ({
     id: a?.id ?? '', name: a?.name ?? '', type: a?.type ?? '', balance: a?.balance ?? 0,
     currency: a?.currency ?? 'TRY', color: a?.color ?? '#10B981', bankName: a?.bankName ?? null,
   }));
 
-  const serializedCreditCards = (creditCards ?? []).map((c: any) => ({
-    id: c?.id ?? '', name: c?.name ?? '', limitAmount: c?.limitAmount ?? 0,
-    usedAmount: c?.usedAmount ?? 0, color: c?.color ?? '#3B82F6',
-    cardNetwork: c?.cardNetwork ?? 'VISA',
-  }));
+  const serializedCreditCards = (creditCards ?? []).map((c: any) => {
+    // Try to match with CREDIT_CARD account to get actual used amount from balance
+    const cardName = (c?.name ?? '').toLowerCase().trim();
+    const matchedAccount = ccAccounts.find((acc: any) => {
+      const accName = (acc?.name ?? '').toLowerCase().trim();
+      return cardName === accName || accName.includes(cardName) || cardName.includes(accName);
+    });
+    // Used amount = abs of negative balance from matched account, or fallback to model value
+    const actualUsed = matchedAccount ? Math.abs(Math.min(0, matchedAccount.balance ?? 0)) : (c?.usedAmount ?? 0);
+    return {
+      id: c?.id ?? '', name: c?.name ?? '', limitAmount: c?.limitAmount ?? 0,
+      usedAmount: actualUsed, color: c?.color ?? '#3B82F6',
+      cardNetwork: c?.cardNetwork ?? 'VISA',
+    };
+  });
 
   const serializedTransactions = (recentTransactions ?? []).map((t: any) => ({
     id: t?.id ?? '', type: t?.type ?? '', amount: t?.amount ?? 0,

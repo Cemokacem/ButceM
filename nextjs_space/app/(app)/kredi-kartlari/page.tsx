@@ -307,8 +307,10 @@ export default function KrediKartlariPage() {
         ) : (
           cards.map((c: any, i: number) => {
             const TierIcon = getTierIcon(c?.cardTier);
-            const usedPct = c?.limitAmount > 0 ? Math.min(100, ((c?.usedAmount ?? 0) / c.limitAmount) * 100) : 0;
             const matchedAccount = findCcAccount(c);
+            // Actual used = abs of negative CREDIT_CARD account balance, or fallback to model value
+            const actualUsed = matchedAccount ? Math.abs(Math.min(0, matchedAccount.balance ?? 0)) : (c?.usedAmount ?? 0);
+            const usedPct = c?.limitAmount > 0 ? Math.min(100, (actualUsed / c.limitAmount) * 100) : 0;
             const isExpanded = expandedCardId === c?.id;
             return (
               <SlideIn key={c?.id} from="bottom" delay={i * 0.05}>
@@ -331,12 +333,12 @@ export default function KrediKartlariPage() {
                     <div>
                       <div className="flex justify-between text-sm mb-1">
                         <span className="text-muted-foreground">Kullanım</span>
-                        <span className="font-medium">{formatCurrency(c?.usedAmount)} / {formatCurrency(c?.limitAmount)}</span>
+                        <span className="font-medium">{formatCurrency(actualUsed)} / {formatCurrency(c?.limitAmount)}</span>
                       </div>
                       <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
                         <div className="h-full rounded-full transition-all" style={{ width: `${usedPct}%`, backgroundColor: usedPct > 80 ? '#EF4444' : usedPct > 50 ? '#F59E0B' : '#10B981' }} />
                       </div>
-                      <p className="text-xs text-muted-foreground mt-1">Kullanılabilir: {formatCurrency((c?.limitAmount ?? 0) - (c?.usedAmount ?? 0))}</p>
+                      <p className="text-xs text-muted-foreground mt-1">Kullanılabilir: {formatCurrency(Math.max(0, (c?.limitAmount ?? 0) - actualUsed))}</p>
                     </div>
                     <div className="grid grid-cols-2 gap-2 text-sm">
                       <div className="bg-muted/50 rounded p-2">
