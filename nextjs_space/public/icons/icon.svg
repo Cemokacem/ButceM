@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Arka plan -->
+  <rect width="512" height="512" rx="112" fill="#0f172a"/>
+  <!-- Yeşil daire -->
+  <circle cx="256" cy="256" r="180" fill="#10b981"/>
+  <!-- ₺ sembolü (beyaz) -->
+  <text x="256" y="340" font-family="-apple-system,Arial,sans-serif" font-size="260" font-weight="700" fill="white" text-anchor="middle">₺</text>
+</svg>
