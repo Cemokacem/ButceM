@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { FadeIn } from '@/components/ui/animate';
 import { formatCurrency } from '@/lib/format';
 import { BarChart3, Download, TrendingUp, TrendingDown } from 'lucide-react';
+import { toast } from 'sonner';
 import dynamic from 'next/dynamic';
 
 const ReportCharts = dynamic(() => import('./report-charts'), { ssr: false, loading: () => <div className="h-64 bg-muted/30 rounded-lg animate-pulse" /> });
@@ -27,7 +28,7 @@ export function ReportsClient({ monthlyData, categoryBreakdown, accountData, tot
       link.click();
       document.body.removeChild(link);
     } catch {
-      // silent
+      toast.error('Dışa aktarma başarısız oldu');
     }
   };
 
@@ -103,19 +104,21 @@ export function ReportsClient({ monthlyData, categoryBreakdown, accountData, tot
             </CardHeader>
             <CardContent>
               <ReportCharts type="category" data={categoryBreakdown} />
-              {(categoryBreakdown ?? []).length > 0 && (
+              {(categoryBreakdown ?? []).length > 0 ? (
                 <div className="mt-4 space-y-2">
-                  {(categoryBreakdown ?? []).map((cat: any, i: number) => (
+                  {(categoryBreakdown ?? []).map((cat, i) => (
                     <div key={i} className="flex items-center justify-between text-sm">
                       <div className="flex items-center gap-2">
-                        <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: cat?.color ?? '#94a3b8' }} />
-                        <span>{cat?.name}</span>
-                        <span className="text-xs text-muted-foreground">({cat?.count} işlem)</span>
+                        <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: cat.color ?? '#94a3b8' }} />
+                        <span>{cat.name}</span>
+                        <span className="text-xs text-muted-foreground">({cat.count} işlem)</span>
                       </div>
-                      <span className="font-mono">{formatCurrency(cat?.total)}</span>
+                      <span className="font-mono">{formatCurrency(cat.total)}</span>
                     </div>
                   ))}
                 </div>
+              ) : (
+                <p className="mt-4 text-sm text-center text-muted-foreground">Henüz gider verisi yok</p>
               )}
             </CardContent>
           </Card>

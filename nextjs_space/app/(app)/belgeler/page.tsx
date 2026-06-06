@@ -147,37 +147,44 @@ export default function BelgelerPage() {
       const decoder = new TextDecoder();
       let partialRead = '';
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        partialRead += decoder.decode(value, { stream: true });
-        let lines = partialRead.split('\n');
-        partialRead = lines.pop() ?? '';
+      try {
+        outer: while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          partialRead += decoder.decode(value, { stream: true });
+          const lines = partialRead.split('\n');
+          partialRead = lines.pop() ?? '';
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
             const data = line.slice(6);
             if (data === '[DONE]') continue;
+
+            let parsed: { status: string; message?: string; result?: OcrResult } | null = null;
             try {
-              const parsed = JSON.parse(data);
-              if (parsed?.status === 'processing') {
-                setProgress((prev: number) => Math.min(prev + 3, 95));
-              } else if (parsed?.status === 'completed') {
-                const result = parsed?.result as OcrResult;
-                setOcrResult(result);
-                setEditResult({ ...(result ?? { amount: 0, description: '', date: '', vendorName: '', category: 'Diğer', items: [] }) });
-                setProgress(100);
-                setProcessing(false);
-                setResultOpen(true);
-                toast.success('Belge analiz edildi');
-              } else if (parsed?.status === 'error') {
-                throw new Error(parsed?.message ?? 'OCR hatası');
-              }
-            } catch (parseErr: any) {
-              // Skip invalid JSON
+              parsed = JSON.parse(data);
+            } catch {
+              continue; // malformed SSE chunk — skip
+            }
+
+            if (parsed?.status === 'processing') {
+              setProgress((prev: number) => Math.min(prev + 3, 95));
+            } else if (parsed?.status === 'completed') {
+              const result = parsed.result as OcrResult;
+              setOcrResult(result);
+              setEditResult({ ...(result ?? { amount: 0, description: '', date: '', vendorName: '', category: 'Diğer', items: [] }) });
+              setProgress(100);
+              setProcessing(false);
+              setResultOpen(true);
+              toast.success('Belge analiz edildi');
+              break outer;
+            } else if (parsed?.status === 'error') {
+              throw new Error(parsed?.message ?? 'OCR hatası');
             }
           }
         }
+      } finally {
+        reader.cancel().catch(() => {});
       }
 
       load();

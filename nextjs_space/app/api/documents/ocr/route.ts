@@ -97,6 +97,11 @@ Sadece JSON olarak yanıt ver.`;
     const decoder = new TextDecoder();
     const encoder = new TextEncoder();
 
+    function extractJson(text: string): string {
+      const match = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+      return match ? match[1].trim() : text.trim();
+    }
+
     const stream = new ReadableStream({
       async start(controller) {
         let buffer = '';
@@ -106,49 +111,49 @@ Sadece JSON olarak yanıt ver.`;
             const { done, value } = await reader.read();
             if (done) break;
             partialRead += decoder.decode(value, { stream: true });
-            let lines = partialRead.split('\n');
+            const lines = partialRead.split('\n');
             partialRead = lines.pop() ?? '';
             for (const line of lines) {
               if (line.startsWith('data: ')) {
                 const data = line.slice(6);
                 if (data === '[DONE]') {
+                  const jsonText = extractJson(buffer);
                   try {
-                    const finalResult = JSON.parse(buffer);
-                    const finalData = JSON.stringify({ status: 'completed', result: finalResult });
-                    controller.enqueue(encoder.encode(`data: ${finalData}\n\n`));
+                    const finalResult = JSON.parse(jsonText);
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ status: 'completed', result: finalResult })}\n\n`));
                   } catch {
-                    const finalData = JSON.stringify({ status: 'completed', result: { amount: 0, description: buffer, date: '', vendorName: '', category: 'Diğer', items: [] } });
-                    controller.enqueue(encoder.encode(`data: ${finalData}\n\n`));
+                    // Buffer couldn't be parsed — return it as description so user can still create a transaction
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ status: 'completed', result: { amount: 0, description: jsonText || buffer, date: '', vendorName: '', category: 'Diğer', items: [], lineItems: [] } })}\n\n`));
                   }
                   return;
                 }
                 try {
                   const parsed = JSON.parse(data);
                   buffer += parsed?.choices?.[0]?.delta?.content ?? '';
-                  const progressData = JSON.stringify({ status: 'processing', message: 'Belge analiz ediliyor...' });
-                  controller.enqueue(encoder.encode(`data: ${progressData}\n\n`));
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ status: 'processing', message: 'Belge analiz ediliyor...' })}\n\n`));
                 } catch {
-                  // skip
+                  // skip malformed SSE chunk
                 }
               }
             }
           }
-          // If we didn't get [DONE], try to parse what we have
+          // Stream ended without [DONE] — parse whatever we accumulated
           if (buffer) {
+            const jsonText = extractJson(buffer);
             try {
-              const finalResult = JSON.parse(buffer);
-              const finalData = JSON.stringify({ status: 'completed', result: finalResult });
-              controller.enqueue(encoder.encode(`data: ${finalData}\n\n`));
+              const finalResult = JSON.parse(jsonText);
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ status: 'completed', result: finalResult })}\n\n`));
             } catch {
-              const finalData = JSON.stringify({ status: 'error', message: 'Belge ayrıştırılamadı' });
-              controller.enqueue(encoder.encode(`data: ${finalData}\n\n`));
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ status: 'completed', result: { amount: 0, description: jsonText || buffer, date: '', vendorName: '', category: 'Diğer', items: [], lineItems: [] } })}\n\n`));
             }
+          } else {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ status: 'error', message: 'Belgeden bilgi çıkarılamadı' })}\n\n`));
           }
         } catch (error: any) {
           console.error('Stream error:', error);
-          const errData = JSON.stringify({ status: 'error', message: error?.message ?? 'Bilinmeyen hata' });
-          controller.enqueue(encoder.encode(`data: ${errData}\n\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ status: 'error', message: error?.message ?? 'Bilinmeyen hata' })}\n\n`));
         } finally {
+          reader.cancel().catch(() => {});
           controller.close();
         }
       },
